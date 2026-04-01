@@ -34,7 +34,8 @@ import {
   Clock,
   Edit,
   Trophy,
-  RefreshCw
+  RefreshCw,
+  ArrowRight
 } from 'lucide-react';
 
 type Dan = 'Shodan (1º Dan)' | 'Nidan (2º Dan)' | 'Sandan (3º Dan)' | 'Yondan (4º Dan)' | 'Godan (5º Dan)';
@@ -135,6 +136,13 @@ export default function App() {
 
   const [currentView, setCurrentView] = useState<ViewState>('avaliacao');
   const [mainTab, setMainTab] = useState<'avaliacao' | 'configuracao' | 'resultados' | 'treinamento'>('avaliacao');
+  
+  // Filtros para Resultados das Avaliações
+  const [filtroModulo, setFiltroModulo] = useState('');
+  const [filtroGrau, setFiltroGrau] = useState('');
+  const [filtroCandidato, setFiltroCandidato] = useState('');
+  const [filtroResultado, setFiltroResultado] = useState('');
+
   const [toastMessage, setToastMessage] = useState<{ text: string, type: 'error' | 'success' | 'info' } | null>(null);
 
   const showToast = useCallback((text: string, type: 'error' | 'success' | 'info' = 'info') => {
@@ -173,9 +181,16 @@ export default function App() {
   
   const [wazaList, setWazaList] = useState<Waza[]>([]);
   const [fullscreenWazaIndex, setFullscreenWazaIndex] = useState<number | null>(null);
+  const [releasedWazaIndex, setReleasedWazaIndex] = useState<number>(-1);
+  const [evaluatorsFinishedWaza, setEvaluatorsFinishedWaza] = useState<Record<string, number>>({});
+  const [activeEvaluators, setActiveEvaluators] = useState<string[]>([]);
   const [fullscreenActiveTab, setFullscreenActiveTab] = useState<'kuzushi' | 'tsukuri' | 'kake'>('kuzushi');
   const [fullscreenKihonIndex, setFullscreenKihonIndex] = useState<number | null>(null);
+  const [releasedKihonIndex, setReleasedKihonIndex] = useState<number>(-1);
+  const [evaluatorsFinishedKihon, setEvaluatorsFinishedKihon] = useState<Record<string, number>>({});
   const [fullscreenKataIndex, setFullscreenKataIndex] = useState<number | null>(null);
+  const [releasedKataIndex, setReleasedKataIndex] = useState<number>(-1);
+  const [evaluatorsFinishedKata, setEvaluatorsFinishedKata] = useState<Record<string, number>>({});
   const [kihonList, setKihonList] = useState<KihonItem[]>([
     { id: 'kihon-1', name: 'Rei (Saudação)', status: 'AVALIAR' },
     { id: 'kihon-2', name: 'Kumi kata (Pegada)', status: 'AVALIAR' },
@@ -250,7 +265,7 @@ export default function App() {
           supabase.from('avaliadores').select('id, nome, graduacao, zempo, funcao').order('nome', { ascending: true }),
           supabase.from('tecnicas').select('*').order('nome', { ascending: true }),
           supabase.from('katas').select('*').order('ordem', { ascending: true }),
-          supabase.from('modulos_avaliacao').select('*').order('data', { ascending: false })
+          supabase.from('modulos_avaliacao').select('*').order('data', { ascending: true })
         ]);
 
         if (candRes.data) setCandidatos(candRes.data);
@@ -447,6 +462,22 @@ export default function App() {
     return [...praticas, ...teoricas].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }, [resultados, resultadosTeoricos, modulos]);
 
+  const filteredResultados = useMemo(() => {
+    return aggregatedResultados.filter(res => {
+      const candidato = candidatos.find(c => c.id === res.candidato_id);
+      const modulo = modulos.find(m => m.id === res.modulo_id);
+      const nomeCandidato = candidato ? candidato.nome : res.candidato_nome || 'Desconhecido';
+      const temaModulo = res.isTeorica ? res.modulo_nome : (modulo ? modulo.tema : 'Desconhecido');
+
+      if (filtroModulo && temaModulo !== filtroModulo) return false;
+      if (filtroGrau && res.grau_pretendido !== filtroGrau) return false;
+      if (filtroCandidato && !nomeCandidato.toLowerCase().includes(filtroCandidato.toLowerCase())) return false;
+      if (filtroResultado && res.veredito !== filtroResultado) return false;
+      
+      return true;
+    });
+  }, [aggregatedResultados, filtroModulo, filtroGrau, filtroCandidato, filtroResultado, candidatos, modulos]);
+
   const handlePrintResult = async (group: any) => {
     const candidato = candidatos.find(c => c.id === group.candidato_id);
     const modulo = modulos.find(m => m.id === group.modulo_id);
@@ -549,7 +580,7 @@ export default function App() {
               <p><span class="label">Candidato:</span> <span class="value">${nomeCandidato}</span></p>
               <p><span class="label">Grau Pretendido:</span> <span class="value">${group.grau_pretendido}</span></p>
               <p><span class="label">Módulo:</span> <span class="value">${temaModulo}</span></p>
-              <p><span class="label">Data:</span> <span class="value">${new Date(group.created_at).toLocaleDateString('pt-BR')}</span></p>
+              <p><span class="label">Data:</span> <span class="value">${group.created_at.includes('T') ? new Date(group.created_at).toLocaleDateString('pt-BR') : group.created_at.split('-').reverse().join('/')}</span></p>
               <p><span class="label">Resultado Final:</span> <span class="badge ${group.veredito}">${group.veredito}</span></p>
               <p><span class="label">Média:</span> <span class="value">${isKatas ? (group.nota_kata !== null ? group.nota_kata + '%' : '-') : (group.percentual_waza !== null ? group.percentual_waza + '%' : '-')}</span></p>
             </div>
@@ -860,7 +891,7 @@ export default function App() {
         const { data, error } = await supabase.from('modulos_avaliacao').insert([newModulo]).select();
         if (error) throw error;
         if (data) {
-          setModulos([data[0], ...modulos]);
+          setModulos([...modulos, data[0]]);
           setIsCreatingModulo(false);
           setNewModulo({ avaliadores_ids: [], coordenadores_ids: [] });
           showToast('Módulo criado com sucesso!', 'success');
@@ -1216,13 +1247,34 @@ export default function App() {
     } else if (field === 'kake') {
       if (currentWaza && currentWaza.kuzushi !== 'AVALIAR' && currentWaza.tsukuri !== 'AVALIAR') {
         setTimeout(() => {
-          if (currentWazaIndex < wazaList.length - 1) {
-            setFullscreenWazaIndex(currentWazaIndex + 1);
+          if (!isCoordinator && channelRef.current) {
+            channelRef.current.send({
+              type: 'broadcast',
+              event: 'waza_evaluated',
+              payload: { avaliadorId: loggedUser?.id, index: currentWazaIndex }
+            });
+          }
+          
+          if (currentWazaIndex < wazaList.length - (isHighDan ? 0 : 1)) {
+            const nextIndex = currentWazaIndex + 1;
+            setFullscreenWazaIndex(nextIndex);
             setFullscreenActiveTab('kuzushi'); // Reset tab for next waza
+            
+            // Se for o coordenador, já libera a próxima técnica para todos
+            if (isCoordinator) {
+              setReleasedWazaIndex(nextIndex);
+              if (channelRef.current) {
+                channelRef.current.send({
+                  type: 'broadcast',
+                  event: 'release_waza',
+                  payload: { index: nextIndex }
+                });
+              }
+            }
           } else {
             setFullscreenWazaIndex(null); // Close fullscreen if it's the last one
             if (!isHighDan && kihonList.length > 0 && selectedTema !== 'Katas') {
-              setFullscreenKihonIndex(0);
+              setFullscreenKihonIndex(-1);
             } else {
               setShowReport(true);
               setPendingAutoSave(true);
@@ -1640,7 +1692,16 @@ export default function App() {
     }
 
     const channel = supabase.channel(channelName, {
-      config: { broadcast: { self: false } }
+      config: { 
+        broadcast: { self: false },
+        presence: { key: loggedUser?.id || 'anonymous' }
+      }
+    });
+
+    channel.on('presence', { event: 'sync' }, () => {
+      const state = channel.presenceState();
+      const activeIds = Object.keys(state);
+      setActiveEvaluators(activeIds);
     });
 
     channel.on('broadcast', { event: 'sync_draw' }, ({ payload }) => {
@@ -1689,17 +1750,24 @@ export default function App() {
           };
         }));
         
-        if (payload.wazaList && payload.wazaList.length > 0) {
+        setReleasedWazaIndex(-1);
+        setReleasedKataIndex(-1);
+        setReleasedKihonIndex(-1);
+        setEvaluatorsFinishedWaza({});
+        setEvaluatorsFinishedKata({});
+        setEvaluatorsFinishedKihon({});
+
+        if (payload.selectedTema === 'Katas' && payload.kataList && payload.kataList.length > 0) {
+          setMainTab('avaliacao');
+          setCurrentView('avaliacao');
+          setFullscreenKataIndex(0);
+        } else if (payload.selectedTema !== 'Katas' && payload.wazaList && payload.wazaList.length > 0) {
           setMainTab('avaliacao');
           setCurrentView('avaliacao');
           // Important: We set the index to 0 so the fullscreen mode opens immediately
           setFullscreenWazaIndex(0);
           setFullscreenActiveTab('kuzushi');
-        } else if (payload.kataList && payload.kataList.length > 0) {
-          setMainTab('avaliacao');
-          setCurrentView('avaliacao');
-          setFullscreenKataIndex(0);
-        } else if (payload.kihonList && payload.kihonList.length > 0 && payload.selectedTema !== 'Katas') {
+        } else if (payload.selectedTema !== 'Katas' && payload.kihonList && payload.kihonList.length > 0) {
           setMainTab('avaliacao');
           setCurrentView('avaliacao');
           setFullscreenKihonIndex(0);
@@ -1711,7 +1779,47 @@ export default function App() {
         
         showToast('Sorteio sincronizado pelo Coordenador!', 'success');
       }
-    }).subscribe();
+    }).on('broadcast', { event: 'release_waza' }, ({ payload }) => {
+      if (!isCoordinator) {
+        setReleasedWazaIndex(payload.index);
+        setFullscreenWazaIndex(payload.index);
+      }
+    }).on('broadcast', { event: 'waza_evaluated' }, ({ payload }) => {
+      if (isCoordinator) {
+        setEvaluatorsFinishedWaza(prev => ({
+          ...prev,
+          [payload.avaliadorId]: Math.max(prev[payload.avaliadorId] || 0, payload.index)
+        }));
+      }
+    }).on('broadcast', { event: 'release_kihon' }, ({ payload }) => {
+      if (!isCoordinator) {
+        setReleasedKihonIndex(payload.index);
+        setFullscreenKihonIndex(payload.index);
+      }
+    }).on('broadcast', { event: 'kihon_evaluated' }, ({ payload }) => {
+      if (isCoordinator) {
+        setEvaluatorsFinishedKihon(prev => ({
+          ...prev,
+          [payload.avaliadorId]: Math.max(prev[payload.avaliadorId] || 0, payload.index)
+        }));
+      }
+    }).on('broadcast', { event: 'release_kata' }, ({ payload }) => {
+      setReleasedKataIndex(payload.index);
+    }).on('broadcast', { event: 'kata_evaluated' }, ({ payload }) => {
+      if (isCoordinator) {
+        setEvaluatorsFinishedKata(prev => ({
+          ...prev,
+          [payload.avaliadorId]: Math.max(prev[payload.avaliadorId] || 0, payload.index)
+        }));
+      }
+    }).subscribe(async (status) => {
+      if (status === 'SUBSCRIBED') {
+        await channel.track({
+          user_id: loggedUser?.id,
+          role: isCoordinator ? 'coordinator' : 'evaluator'
+        });
+      }
+    });
 
     channelRef.current = channel;
 
@@ -1723,6 +1831,16 @@ export default function App() {
 
   const broadcastDraw = () => {
     if (!channelRef.current) return;
+
+    if (selectedTema === 'Katas' && kataList.length === 0) {
+      showToast('Selecione um Kata antes de transmitir.', 'error');
+      return;
+    }
+
+    if (selectedTema !== 'Katas' && wazaList.length === 0 && (!kihonList || kihonList.length === 0)) {
+      showToast('Sorteie as técnicas antes de transmitir.', 'error');
+      return;
+    }
 
     const payload = {
       candidatoId: selectedCandidatoId,
@@ -1746,12 +1864,25 @@ export default function App() {
       }
     });
 
-    if (wazaList.length > 0) {
+    setReleasedWazaIndex(-1);
+    setReleasedKataIndex(-1);
+    setReleasedKihonIndex(-1);
+    setEvaluatorsFinishedWaza({});
+    setEvaluatorsFinishedKata({});
+    setEvaluatorsFinishedKihon({});
+
+    if (selectedTema === 'Katas' && kataList.length > 0) {
+      setMainTab('avaliacao');
+      setCurrentView('avaliacao');
+      setFullscreenKataIndex(0);
+    } else if (selectedTema !== 'Katas' && wazaList.length > 0) {
+      setMainTab('avaliacao');
+      setCurrentView('avaliacao');
       setFullscreenWazaIndex(0);
       setFullscreenActiveTab('kuzushi');
-    } else if (kataList.length > 0) {
-      setFullscreenKataIndex(0);
-    } else if (kihonList.length > 0 && selectedTema !== 'Katas') {
+    } else if (selectedTema !== 'Katas' && kihonList.length > 0) {
+      setMainTab('avaliacao');
+      setCurrentView('avaliacao');
       setFullscreenKihonIndex(0);
     }
   };
@@ -2008,20 +2139,20 @@ export default function App() {
             {/* Main Navigation Tabs */}
             <div className="flex flex-wrap justify-center bg-red-800 rounded-lg p-1">
               {loggedRole === 'avaliador' && (
-                <>
-                  <button 
-                    onClick={() => { setMainTab('avaliacao'); setCurrentView('avaliacao'); }}
-                    className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${mainTab === 'avaliacao' ? 'bg-white text-red-700 shadow-sm' : 'text-red-100 hover:bg-red-700'}`}
-                  >
-                    <ClipboardSignature className="w-4 h-4" /> Avaliação
-                  </button>
-                  <button 
-                    onClick={() => { setMainTab('configuracao'); if (currentView === 'avaliacao') setCurrentView('candidatos'); }}
-                    className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${mainTab === 'configuracao' ? 'bg-white text-red-700 shadow-sm' : 'text-red-100 hover:bg-red-700'}`}
-                  >
-                    <Settings className="w-4 h-4" /> Configuração
-                  </button>
-                </>
+                <button 
+                  onClick={() => { setMainTab('avaliacao'); setCurrentView('avaliacao'); }}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${mainTab === 'avaliacao' ? 'bg-white text-red-700 shadow-sm' : 'text-red-100 hover:bg-red-700'}`}
+                >
+                  <ClipboardSignature className="w-4 h-4" /> Avaliação
+                </button>
+              )}
+              {isUserAdmin(loggedUser) && (
+                <button 
+                  onClick={() => { setMainTab('configuracao'); if (currentView === 'avaliacao') setCurrentView('candidatos'); }}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${mainTab === 'configuracao' ? 'bg-white text-red-700 shadow-sm' : 'text-red-100 hover:bg-red-700'}`}
+                >
+                  <Settings className="w-4 h-4" /> Configuração
+                </button>
               )}
               <button 
                 onClick={() => { setMainTab('resultados'); setCurrentView('resultados'); }}
@@ -2029,12 +2160,14 @@ export default function App() {
               >
                 <FileText className="w-4 h-4" /> Resultados
               </button>
-              <button 
-                onClick={() => { setMainTab('treinamento'); setCurrentView('treinamento'); }}
-                className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${mainTab === 'treinamento' ? 'bg-white text-red-700 shadow-sm' : 'text-red-100 hover:bg-red-700'}`}
-              >
-                <GraduationCap className="w-4 h-4" /> Treinamento
-              </button>
+              {isUserAdmin(loggedUser) && (
+                <button 
+                  onClick={() => { setMainTab('treinamento'); setCurrentView('treinamento'); }}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${mainTab === 'treinamento' ? 'bg-white text-red-700 shadow-sm' : 'text-red-100 hover:bg-red-700'}`}
+                >
+                  <GraduationCap className="w-4 h-4" /> Treinamento
+                </button>
+              )}
             </div>
 
             <button 
@@ -2051,7 +2184,7 @@ export default function App() {
       <main className="max-w-5xl mx-auto mt-8 px-4">
         
         {/* Sub-Navigation for Configuração */}
-        {mainTab === 'configuracao' && (
+        {isUserAdmin(loggedUser) && mainTab === 'configuracao' && (
           <div className="flex flex-wrap gap-2 mb-6 bg-white p-2 rounded-lg shadow-sm border border-slate-200">
             <button 
               onClick={() => setCurrentView('candidatos')}
@@ -2087,7 +2220,7 @@ export default function App() {
         )}
 
         {/* VIEW: CADASTRO DE CANDIDATOS */}
-        {mainTab === 'configuracao' && currentView === 'candidatos' && (
+        {isUserAdmin(loggedUser) && mainTab === 'configuracao' && currentView === 'candidatos' && (
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 animate-in fade-in">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 border-b pb-4">
               <h2 className="text-xl font-bold flex items-center gap-2">
@@ -2186,7 +2319,7 @@ export default function App() {
         )}
 
         {/* VIEW: CADASTRO DE AVALIADORES */}
-        {mainTab === 'configuracao' && currentView === 'avaliadores' && (
+        {isUserAdmin(loggedUser) && mainTab === 'configuracao' && currentView === 'avaliadores' && (
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 animate-in fade-in">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 border-b pb-4">
               <h2 className="text-xl font-bold flex items-center gap-2">
@@ -2290,7 +2423,7 @@ export default function App() {
         )}
 
         {/* VIEW: CADASTRO DE TÉCNICAS */}
-        {mainTab === 'configuracao' && currentView === 'tecnicas' && (
+        {isUserAdmin(loggedUser) && mainTab === 'configuracao' && currentView === 'tecnicas' && (
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 animate-in fade-in">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 border-b pb-4">
               <h2 className="text-xl font-bold flex items-center gap-2">
@@ -2376,7 +2509,7 @@ export default function App() {
         )}
 
         {/* VIEW: KATAS */}
-        {mainTab === 'configuracao' && currentView === 'katas' && (
+        {isUserAdmin(loggedUser) && mainTab === 'configuracao' && currentView === 'katas' && (
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 animate-in fade-in">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 border-b pb-4">
               <h2 className="text-xl font-bold flex items-center gap-2">
@@ -2456,7 +2589,7 @@ export default function App() {
         )}
 
         {/* VIEW: AVALIAÇÕES TEÓRICAS */}
-        {mainTab === 'configuracao' && currentView === 'avaliacoes_teoricas' && (
+        {isUserAdmin(loggedUser) && mainTab === 'configuracao' && currentView === 'avaliacoes_teoricas' && (
           <AvaliacoesTeoricas />
         )}
 
@@ -2598,6 +2731,10 @@ export default function App() {
                 if (loggedRole !== 'avaliador') return true;
                 if (isUserAdmin(loggedUser)) return true;
                 return m.avaliadores_ids?.includes(loggedUser?.id || '') || m.coordenadores_ids?.includes(loggedUser?.id || '');
+              }).sort((a, b) => {
+                const dateA = a.data ? new Date(a.data).getTime() : 0;
+                const dateB = b.data ? new Date(b.data).getTime() : 0;
+                return dateA - dateB;
               }).map(m => (
                 <div key={m.id} className="border border-slate-200 rounded-xl p-5 hover:border-red-300 hover:shadow-md transition-all bg-white flex flex-col h-full relative group">
                   {(loggedRole === 'avaliador' && ('funcao' in loggedUser) && (isUserAdmin(loggedUser) || m.coordenadores_ids?.includes(loggedUser.id))) && (
@@ -2615,7 +2752,7 @@ export default function App() {
                   )}
                   <div className="font-bold text-lg mb-3 text-slate-800 line-clamp-2 pr-8">{m.tema || 'Sem Tema'}</div>
                   <div className="text-sm text-slate-600 space-y-2 flex-grow">
-                    <p className="flex items-center gap-2"><span className="font-medium w-16">Data:</span> {m.data ? new Date(m.data).toLocaleDateString('pt-BR') : 'N/A'}</p>
+                    <p className="flex items-center gap-2"><span className="font-medium w-16">Data:</span> {m.data ? m.data.split('-').reverse().join('/') : 'N/A'}</p>
                     <p className="flex items-center gap-2"><span className="font-medium w-16">Horário:</span> {m.horario_inicio || '--:--'} às {m.horario_fim || '--:--'}</p>
                     <p className="flex items-start gap-2"><span className="font-medium w-16">Local:</span> <span className="flex-1">{m.local || 'N/A'} {m.regiao ? `(${m.regiao})` : ''}</span></p>
                   </div>
@@ -2648,7 +2785,7 @@ export default function App() {
               <div>
                 <h2 className="font-bold text-lg text-slate-800">Módulo: {modulos.find(m => m.id === selectedModuloId)?.tema}</h2>
                 <p className="text-sm text-slate-500">
-                  {modulos.find(m => m.id === selectedModuloId)?.local} • {modulos.find(m => m.id === selectedModuloId)?.data ? new Date(modulos.find(m => m.id === selectedModuloId)?.data || '').toLocaleDateString('pt-BR') : ''}
+                  {modulos.find(m => m.id === selectedModuloId)?.local} • {modulos.find(m => m.id === selectedModuloId)?.data ? modulos.find(m => m.id === selectedModuloId)?.data?.split('-').reverse().join('/') : ''}
                 </p>
               </div>
               <div className="flex items-center gap-3">
@@ -2752,26 +2889,178 @@ export default function App() {
                   </div>
                 </div>
 
-                {selectedCandidatoId && (
-                  <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-md text-sm text-emerald-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle className="w-4 h-4 shrink-0" />
-                      <span>Avaliando <strong>{finalCandidateName}</strong> para <strong>{finalTargetDan}</strong>.</span>
-                    </div>
-                    {isCoordinator && (
-                      <button
-                        onClick={() => {
-                          setSelectedCandidatoId('');
-                          setManualCandidateName('');
-                          setWazaList([]);
-                          setKataList([]);
-                          setKihonList([]);
-                        }}
-                        className="text-xs font-medium text-emerald-700 hover:text-emerald-900 flex items-center gap-1 bg-emerald-100 hover:bg-emerald-200 px-3 py-1.5 rounded-md transition-colors shrink-0"
-                      >
-                        <RefreshCw className="w-3 h-3" /> Substituir Candidato
-                      </button>
+                {!selectedCandidatoId ? (
+                  <div className="mt-4 pt-4 border-t border-slate-200">
+                    {isCoordinator ? (
+                      <>
+                        <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
+                          <UserPlus className="w-4 h-4 text-red-500" />
+                          Indicar novo Candidato
+                        </h3>
+                        <div className="w-full text-left">
+                          {isAddingManualCandidate ? (
+                            <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                              <h3 className="font-bold text-slate-800 border-b pb-2 mb-4">Novo Candidato</h3>
+                              <div>
+                                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase tracking-wider">Nome Completo</label>
+                                <input 
+                                  type="text" 
+                                  value={manualCandidateName}
+                                  onChange={(e) => setManualCandidateName(e.target.value)}
+                                  className="w-full p-2 border border-slate-300 rounded-md outline-none focus:ring-2 focus:ring-red-500 bg-white"
+                                  placeholder="Ex: Jigoro Kano"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase tracking-wider">Grau Pretendido</label>
+                                <select 
+                                  value={targetDan}
+                                  onChange={(e) => setTargetDan(e.target.value as Dan)}
+                                  className="w-full p-2 border border-slate-300 rounded-md outline-none focus:ring-2 focus:ring-red-500 bg-white"
+                                >
+                                  <option value="Shodan (1º Dan)">Shodan (1º Dan)</option>
+                                  <option value="Nidan (2º Dan)">Nidan (2º Dan)</option>
+                                  <option value="Sandan (3º Dan)">Sandan (3º Dan)</option>
+                                  <option value="Yondan (4º Dan)">Yondan (4º Dan)</option>
+                                  <option value="Godan (5º Dan)">Godan (5º Dan)</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase tracking-wider">Dojo</label>
+                                <input 
+                                  type="text" 
+                                  value={manualDojo}
+                                  onChange={(e) => setManualDojo(e.target.value)}
+                                  className="w-full p-2 border border-slate-300 rounded-md outline-none focus:ring-2 focus:ring-red-500 bg-white"
+                                  placeholder="Ex: Kodokan"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase tracking-wider">Zempo</label>
+                                <input 
+                                  type="text" 
+                                  value={manualZempo}
+                                  onChange={(e) => setManualZempo(e.target.value)}
+                                  className="w-full p-2 border border-slate-300 rounded-md outline-none focus:ring-2 focus:ring-red-500 bg-white"
+                                  placeholder="Ex: 12345"
+                                />
+                              </div>
+                              <div className="flex gap-2 pt-2">
+                                <button 
+                                  onClick={() => setIsAddingManualCandidate(false)}
+                                  className="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 py-2 rounded-md font-medium transition-colors"
+                                >
+                                  Cancelar
+                                </button>
+                                <button 
+                                  onClick={async () => {
+                                    if (!manualCandidateName.trim()) {
+                                      showToast('Preencha o nome do candidato.', 'error');
+                                      return;
+                                    }
+                                    try {
+                                      const { data, error } = await supabase.from('candidatos').insert([{ 
+                                        nome: manualCandidateName, 
+                                        grau_pretendido: targetDan, 
+                                        dojo: manualDojo, 
+                                        zempo: manualZempo 
+                                      }]).select();
+                                      
+                                      if (error) throw error;
+                                      if (data && data.length > 0) {
+                                        setCandidatos(prev => [...prev, data[0]].sort((a, b) => a.nome.localeCompare(b.nome)));
+                                        setSelectedCandidatoId(data[0].id);
+                                        setIsAddingManualCandidate(false);
+                                        showToast('Candidato adicionado com sucesso!', 'success');
+                                      }
+                                    } catch (err: any) {
+                                      showToast(`Erro ao adicionar candidato: ${err.message}`, 'error');
+                                    }
+                                  }}
+                                  className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded-md font-medium transition-colors"
+                                >
+                                  Salvar e Iniciar
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <select 
+                                value={selectedCandidatoId}
+                                onChange={(e) => {
+                                  if (e.target.value === 'manual') {
+                                    setIsAddingManualCandidate(true);
+                                    setManualCandidateName('');
+                                    setManualDojo('');
+                                    setManualZempo('');
+                                    setTargetDan('Shodan (1º Dan)');
+                                  } else {
+                                    setSelectedCandidatoId(e.target.value);
+                                  }
+                                }}
+                                className="w-full p-3 border-2 border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 bg-white shadow-sm text-slate-700 text-lg transition-all"
+                              >
+                                <option value="">SELECIONE O CANDIDATO</option>
+                                <option value="manual">+ Adicionar Novo Candidato (Entrada Manual)</option>
+                                {[...candidatos].sort((a, b) => a.nome.localeCompare(b.nome)).map(c => {
+                                  const isEvaluated = evaluatedCandidatesIds.includes(c.id);
+                                  return (
+                                    <option key={c.id} value={c.id} disabled={isEvaluated}>
+                                      {c.nome} - {c.dojo} {isEvaluated ? '(Já avaliado)' : ''}
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                            </>
+                          )}
+                        </div>
+                      </>
+                    ) : !followingCoordinatorId ? (
+                      <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 text-center">
+                        <Users className="w-8 h-8 text-red-500 mx-auto mb-2" />
+                        <h3 className="text-sm font-bold text-slate-800 mb-1">Selecione sua Banca</h3>
+                        <p className="text-xs text-slate-500">
+                          Por favor, selecione qual coordenador você está acompanhando acima para começar a receber o sorteio.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 text-center">
+                        <Clock className="w-8 h-8 text-slate-400 mx-auto mb-2 animate-pulse" />
+                        <h3 className="text-sm font-bold text-slate-800 mb-1">Aguardando próximo candidato</h3>
+                        <p className="text-xs text-slate-500">
+                          O coordenador da banca está selecionando o próximo candidato.
+                        </p>
+                      </div>
                     )}
+                  </div>
+                ) : (
+                  <div className="mt-4 pt-4 border-t border-slate-200">
+                    <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-md text-sm text-emerald-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle className="w-4 h-4 shrink-0" />
+                        <span>Avaliando <strong>{finalCandidateName}</strong> para <strong>{finalTargetDan}</strong>.</span>
+                      </div>
+                      {isCoordinator && (
+                        <button
+                          onClick={() => {
+                            setSelectedCandidatoId('');
+                            setManualCandidateName('');
+                            setWazaList([]);
+                            setKataList([]);
+                            setKihonList([]);
+                            setFullscreenWazaIndex(null);
+                            setFullscreenKataIndex(null);
+                            setFullscreenKihonIndex(null);
+                            setReleasedWazaIndex(-1);
+                            setReleasedKataIndex(-1);
+                            setReleasedKihonIndex(-1);
+                          }}
+                          className="text-xs font-medium text-emerald-700 hover:text-emerald-900 flex items-center gap-1 bg-emerald-100 hover:bg-emerald-200 px-3 py-1.5 rounded-md transition-colors shrink-0"
+                        >
+                          <RefreshCw className="w-3 h-3" /> Substituir Candidato
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )}
                 
@@ -2898,171 +3187,9 @@ export default function App() {
                     </p>
                   </div>
                 )}
-
-                {selectedCandidatoId && (wazaList.length > 0 || kataList.length > 0 || kihonList.length > 0) && (
-                  <div className="mt-4 pt-4 border-t border-slate-200">
-                    <button 
-                      onClick={() => {
-                        if (wazaList.length > 0) setFullscreenWazaIndex(0);
-                        else if (kataList.length > 0) setFullscreenKataIndex(0);
-                        else if (kihonList.length > 0 && selectedTema !== 'Katas') setFullscreenKihonIndex(0);
-                      }}
-                      className="w-full bg-red-600 hover:bg-red-700 text-white py-3 rounded-md font-medium flex items-center justify-center gap-2 transition-colors shadow-sm"
-                    >
-                      <Maximize className="w-5 h-5" />
-                      Abrir Tela de Avaliação
-                    </button>
-                  </div>
-                )}
               </section>
 
-              {!selectedCandidatoId ? (
-                <div className="bg-white p-12 rounded-xl shadow-sm border border-slate-200 flex flex-col items-center justify-center text-center min-h-[50vh]">
-                  {isCoordinator ? (
-                    <>
-                      <UserPlus className="w-16 h-16 text-red-500 mb-4" />
-                      <h2 className="text-2xl font-bold text-slate-800 mb-2">Indicar novo Candidato</h2>
-                      <p className="text-slate-500 mb-6 max-w-md">
-                        Selecione o próximo candidato na lista abaixo para iniciar uma nova avaliação.
-                      </p>
-                      <div className="w-full max-w-md text-left">
-                        {isAddingManualCandidate ? (
-                          <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
-                            <h3 className="font-bold text-slate-800 border-b pb-2 mb-4">Novo Candidato</h3>
-                            <div>
-                              <label className="block text-xs font-medium text-slate-500 mb-1 uppercase tracking-wider">Nome Completo</label>
-                              <input 
-                                type="text" 
-                                value={manualCandidateName}
-                                onChange={(e) => setManualCandidateName(e.target.value)}
-                                className="w-full p-2 border border-slate-300 rounded-md outline-none focus:ring-2 focus:ring-red-500 bg-white"
-                                placeholder="Ex: Jigoro Kano"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-xs font-medium text-slate-500 mb-1 uppercase tracking-wider">Grau Pretendido</label>
-                              <select 
-                                value={targetDan}
-                                onChange={(e) => setTargetDan(e.target.value as Dan)}
-                                className="w-full p-2 border border-slate-300 rounded-md outline-none focus:ring-2 focus:ring-red-500 bg-white"
-                              >
-                                <option value="Shodan (1º Dan)">Shodan (1º Dan)</option>
-                                <option value="Nidan (2º Dan)">Nidan (2º Dan)</option>
-                                <option value="Sandan (3º Dan)">Sandan (3º Dan)</option>
-                                <option value="Yondan (4º Dan)">Yondan (4º Dan)</option>
-                                <option value="Godan (5º Dan)">Godan (5º Dan)</option>
-                              </select>
-                            </div>
-                            <div>
-                              <label className="block text-xs font-medium text-slate-500 mb-1 uppercase tracking-wider">Dojo</label>
-                              <input 
-                                type="text" 
-                                value={manualDojo}
-                                onChange={(e) => setManualDojo(e.target.value)}
-                                className="w-full p-2 border border-slate-300 rounded-md outline-none focus:ring-2 focus:ring-red-500 bg-white"
-                                placeholder="Ex: Kodokan"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-xs font-medium text-slate-500 mb-1 uppercase tracking-wider">Zempo</label>
-                              <input 
-                                type="text" 
-                                value={manualZempo}
-                                onChange={(e) => setManualZempo(e.target.value)}
-                                className="w-full p-2 border border-slate-300 rounded-md outline-none focus:ring-2 focus:ring-red-500 bg-white"
-                                placeholder="Ex: 12345"
-                              />
-                            </div>
-                            <div className="flex gap-2 pt-2">
-                              <button 
-                                onClick={() => setIsAddingManualCandidate(false)}
-                                className="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 py-2 rounded-md font-medium transition-colors"
-                              >
-                                Cancelar
-                              </button>
-                              <button 
-                                onClick={async () => {
-                                  if (!manualCandidateName.trim()) {
-                                    showToast('Preencha o nome do candidato.', 'error');
-                                    return;
-                                  }
-                                  try {
-                                    const { data, error } = await supabase.from('candidatos').insert([{ 
-                                      nome: manualCandidateName, 
-                                      grau_pretendido: targetDan, 
-                                      dojo: manualDojo, 
-                                      zempo: manualZempo 
-                                    }]).select();
-                                    
-                                    if (error) throw error;
-                                    if (data && data.length > 0) {
-                                      setCandidatos(prev => [...prev, data[0]].sort((a, b) => a.nome.localeCompare(b.nome)));
-                                      setSelectedCandidatoId(data[0].id);
-                                      setIsAddingManualCandidate(false);
-                                      showToast('Candidato adicionado com sucesso!', 'success');
-                                    }
-                                  } catch (err: any) {
-                                    showToast(`Erro ao adicionar candidato: ${err.message}`, 'error');
-                                  }
-                                }}
-                                className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded-md font-medium transition-colors"
-                              >
-                                Salvar e Iniciar
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Candidato</label>
-                            <select 
-                              value={selectedCandidatoId}
-                              onChange={(e) => {
-                                if (e.target.value === 'manual') {
-                                  setIsAddingManualCandidate(true);
-                                  setManualCandidateName('');
-                                  setManualDojo('');
-                                  setManualZempo('');
-                                  setTargetDan('Shodan (1º Dan)');
-                                } else {
-                                  setSelectedCandidatoId(e.target.value);
-                                }
-                              }}
-                              className="w-full p-3 border-2 border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 bg-white shadow-sm text-slate-700 text-lg transition-all"
-                            >
-                              <option value="">SELECIONE O CANDIDATO</option>
-                              <option value="manual">+ Adicionar Novo Candidato (Entrada Manual)</option>
-                              {[...candidatos].sort((a, b) => a.nome.localeCompare(b.nome)).map(c => {
-                                const isEvaluated = evaluatedCandidatesIds.includes(c.id);
-                                return (
-                                  <option key={c.id} value={c.id} disabled={isEvaluated}>
-                                    {c.nome} - {c.dojo} {isEvaluated ? '(Já avaliado)' : ''}
-                                  </option>
-                                );
-                              })}
-                            </select>
-                          </>
-                        )}
-                      </div>
-                    </>
-                  ) : !followingCoordinatorId ? (
-                    <>
-                      <Users className="w-16 h-16 text-red-500 mb-4" />
-                      <h2 className="text-2xl font-bold text-slate-800 mb-2">Selecione sua Banca</h2>
-                      <p className="text-slate-500 max-w-md">
-                        Por favor, selecione qual coordenador você está acompanhando na seção "Dados da Avaliação" para começar a receber o sorteio.
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <Clock className="w-16 h-16 text-slate-400 mb-4 animate-pulse" />
-                      <h2 className="text-2xl font-bold text-slate-800 mb-2">Aguardando próximo candidato</h2>
-                      <p className="text-slate-500 max-w-md">
-                        O coordenador da banca está selecionando o próximo candidato. A avaliação iniciará automaticamente assim que o sorteio for transmitido.
-                      </p>
-                    </>
-                  )}
-                </div>
-              ) : (
+              {selectedCandidatoId && (
                 <>
               {/* Waza Evaluation (Hidden in main view) */}
               {false && selectedTema !== 'Katas' && (
@@ -3304,19 +3431,6 @@ export default function App() {
                   </div>
                 </section>
               )}
-
-              <button 
-                onClick={() => {
-                  if (!selectedCandidatoId) {
-                    showToast('Selecione um candidato antes de gerar o parecer.', 'error');
-                    return;
-                  }
-                  setShowReport(true);
-                }} 
-                className="w-full py-4 bg-red-700 hover:bg-red-800 text-white font-bold rounded-xl shadow-md transition-all flex justify-center items-center gap-2 text-lg"
-              >
-                <FileText className="w-6 h-6" /> Gerar Parecer Técnico
-              </button>
                 </>
               )}
 
@@ -3450,7 +3564,6 @@ export default function App() {
                   <div className="bg-slate-100 border-2 border-dashed border-slate-300 rounded-xl h-full min-h-[400px] flex flex-col items-center justify-center text-slate-400 p-6 text-center">
                     <FileText className="w-12 h-12 mb-4 opacity-50" />
                     <p>Preencha os dados da avaliação ao lado.</p>
-                    <p className="text-sm mt-2">Clique em "Gerar Parecer Técnico" para visualizar o resultado oficial.</p>
                   </div>
                 )}
               </div>
@@ -3476,9 +3589,52 @@ export default function App() {
               </button>
             </div>
 
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Módulo</label>
+                <select value={filtroModulo} onChange={(e) => setFiltroModulo(e.target.value)} className="w-full p-2 text-sm border border-slate-300 rounded-md bg-white outline-none focus:ring-2 focus:ring-red-500">
+                  <option value="">Todos</option>
+                  {Array.from(new Set(aggregatedResultados.map(res => {
+                    const modulo = modulos.find(m => m.id === res.modulo_id);
+                    return res.isTeorica ? res.modulo_nome : (modulo ? modulo.tema : 'Desconhecido');
+                  }))).map(tema => (
+                    <option key={tema} value={tema}>{tema}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Grau Pretendido</label>
+                <select value={filtroGrau} onChange={(e) => setFiltroGrau(e.target.value)} className="w-full p-2 text-sm border border-slate-300 rounded-md bg-white outline-none focus:ring-2 focus:ring-red-500">
+                  <option value="">Todos</option>
+                  {Array.from(new Set(aggregatedResultados.map(res => res.grau_pretendido))).map(grau => (
+                    <option key={grau} value={grau}>{grau}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Candidato</label>
+                <input 
+                  type="text" 
+                  value={filtroCandidato} 
+                  onChange={(e) => setFiltroCandidato(e.target.value)} 
+                  placeholder="Buscar por nome..."
+                  className="w-full p-2 text-sm border border-slate-300 rounded-md bg-white outline-none focus:ring-2 focus:ring-red-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Resultado Final</label>
+                <select value={filtroResultado} onChange={(e) => setFiltroResultado(e.target.value)} className="w-full p-2 text-sm border border-slate-300 rounded-md bg-white outline-none focus:ring-2 focus:ring-red-500">
+                  <option value="">Todos</option>
+                  <option value="Aprovado">Aprovado</option>
+                  <option value="Pendente">Pendente</option>
+                  <option value="Reprovado">Reprovado</option>
+                </select>
+              </div>
+            </div>
+
             {isLoadingResultados ? (
               <div className="text-center py-8 text-slate-500">Carregando resultados...</div>
-            ) : aggregatedResultados.length === 0 ? (
+            ) : filteredResultados.length === 0 ? (
               <div className="text-center py-8 text-slate-500">Nenhum resultado encontrado.</div>
             ) : (
               <div className="overflow-x-auto">
@@ -3495,7 +3651,7 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {aggregatedResultados.map((res) => {
+                    {filteredResultados.map((res) => {
                       const candidato = candidatos.find(c => c.id === res.candidato_id);
                       const modulo = modulos.find(m => m.id === res.modulo_id);
                       const nomeCandidato = candidato ? candidato.nome : res.candidato_nome || 'Desconhecido';
@@ -3505,7 +3661,7 @@ export default function App() {
                       return (
                         <tr key={res.id} className="hover:bg-slate-50 transition-colors">
                           <td className="p-3 text-sm text-slate-600">
-                            {new Date(res.created_at).toLocaleDateString('pt-BR')}
+                            {res.created_at.includes('T') ? new Date(res.created_at).toLocaleDateString('pt-BR') : res.created_at.split('-').reverse().join('/')}
                           </td>
                           <td className="p-3 font-medium text-slate-800">
                             {nomeCandidato}
@@ -3561,7 +3717,7 @@ export default function App() {
           </div>
         )}
 
-        {mainTab === 'treinamento' && (
+        {isUserAdmin(loggedUser) && mainTab === 'treinamento' && (
           <TreinamentoCapacitacao loggedUser={loggedUser} loggedRole={loggedRole} />
         )}
 
@@ -3570,7 +3726,97 @@ export default function App() {
       {/* Fullscreen Waza Evaluation Mode */}
       {fullscreenWazaIndex !== null && (
         <div className="fixed inset-0 z-50 bg-slate-900 flex flex-col">
-          {(wazaList[fullscreenWazaIndex] || (isHighDan && fullscreenWazaIndex === wazaList.length)) ? (
+          {fullscreenWazaIndex > releasedWazaIndex ? (
+            <div className="flex-1 bg-black flex flex-col items-center justify-center text-white p-6 relative">
+              <button 
+                onClick={() => setFullscreenWazaIndex(null)}
+                className="absolute top-4 right-4 text-slate-500 hover:text-white transition-colors"
+              >
+                <XCircle className="w-8 h-8" />
+              </button>
+              
+              <div className="flex flex-col items-center justify-center max-w-3xl text-center space-y-8 animate-in zoom-in-95 duration-500">
+                <div className="space-y-2">
+                  <p className="text-red-500 font-bold tracking-widest uppercase text-sm md:text-base">Próxima Técnica</p>
+                  <h2 className="text-4xl md:text-6xl lg:text-7xl font-black tracking-wider uppercase text-white drop-shadow-lg">
+                    {fullscreenWazaIndex === wazaList.length ? 'Critérios Gerais' : (wazaList[fullscreenWazaIndex]?.name || `Técnica ${fullscreenWazaIndex + 1}`)}
+                  </h2>
+                </div>
+                
+                <div className="pt-12">
+                  {isCoordinator ? (
+                    <button
+                      disabled={
+                        (() => {
+                          const modulo = modulos.find(m => m.id === selectedModuloId);
+                          if (!modulo || !modulo.avaliadores_ids) return false;
+                          
+                          // Get all evaluators for this module EXCEPT the coordinator themselves
+                          // AND ONLY those who are currently active in the channel
+                          const evaluatorsToWait = modulo.avaliadores_ids.filter(id => 
+                            id !== loggedUser?.id && activeEvaluators.includes(id)
+                          );
+                          
+                          // If there are no other evaluators, don't disable
+                          if (evaluatorsToWait.length === 0) return false;
+                          
+                          // If it's the first technique, don't wait for previous
+                          if (fullscreenWazaIndex === 0) return false;
+                          
+                          // Check if ALL other evaluators have finished this waza
+                          const allFinished = evaluatorsToWait.every(id => 
+                            (evaluatorsFinishedWaza[id] !== undefined && evaluatorsFinishedWaza[id] >= fullscreenWazaIndex - 1)
+                          );
+                          
+                          return !allFinished;
+                        })()
+                      }
+                      onClick={() => {
+                        setReleasedWazaIndex(fullscreenWazaIndex);
+                        if (channelRef.current) {
+                          channelRef.current.send({
+                            type: 'broadcast',
+                            event: 'release_waza',
+                            payload: { index: fullscreenWazaIndex }
+                          });
+                        }
+                      }}
+                      className="px-8 py-4 bg-red-600 hover:bg-red-700 text-white rounded-full font-bold text-xl transition-all shadow-lg shadow-red-900/50 hover:scale-105 active:scale-95 flex items-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:active:scale-100"
+                    >
+                      <span>Liberar Técnica</span>
+                      {(() => {
+                        const modulo = modulos.find(m => m.id === selectedModuloId);
+                        if (!modulo || !modulo.avaliadores_ids) return null;
+                        
+                        const evaluatorsToWait = modulo.avaliadores_ids.filter(id => 
+                          id !== loggedUser?.id && activeEvaluators.includes(id)
+                        );
+                        
+                        const waitingCount = evaluatorsToWait.filter(id => 
+                          (evaluatorsFinishedWaza[id] || 0) < fullscreenWazaIndex - 1
+                        ).length;
+                        
+                        if (waitingCount > 0) {
+                          return (
+                            <span className="text-sm font-normal text-red-200 ml-2">
+                              ({waitingCount} pendente{waitingCount > 1 ? 's' : ''})
+                            </span>
+                          );
+                        }
+                        return null;
+                      })()}
+                      <ArrowRight className="w-6 h-6" />
+                    </button>
+                  ) : (
+                    <div className="flex flex-col items-center gap-4 opacity-70">
+                      <div className="w-10 h-10 border-4 border-slate-700 border-t-red-500 rounded-full animate-spin"></div>
+                      <p className="text-slate-400 font-medium uppercase tracking-widest text-sm">Aguardando liberação do coordenador...</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (wazaList[fullscreenWazaIndex] || (isHighDan && fullscreenWazaIndex === wazaList.length)) ? (
             <>
               {/* Header */}
               <div className="bg-slate-800 text-white p-3 sm:p-4 flex flex-col shadow-md relative min-h-[6rem] gap-3">
@@ -3771,7 +4017,18 @@ export default function App() {
           <div className="bg-white border-t border-slate-200 p-4 flex justify-between items-center shrink-0">
             <button
               onClick={() => {
-                setFullscreenWazaIndex(prev => prev !== null ? Math.max(0, prev - 1) : null);
+                const prevIndex = fullscreenWazaIndex !== null ? Math.max(0, fullscreenWazaIndex - 1) : null;
+                if (isCoordinator && prevIndex !== null) {
+                  setReleasedWazaIndex(prevIndex);
+                  if (channelRef.current) {
+                    channelRef.current.send({
+                      type: 'broadcast',
+                      event: 'release_waza',
+                      payload: { index: prevIndex }
+                    });
+                  }
+                }
+                setFullscreenWazaIndex(prevIndex);
                 setFullscreenActiveTab('kuzushi');
               }}
               disabled={fullscreenWazaIndex === 0}
@@ -3782,9 +4039,22 @@ export default function App() {
             
             <div className="flex gap-2">
               {Array.from({ length: wazaList.length + (isHighDan ? 1 : 0) }).map((_, idx) => (
-                <div 
+                <button 
                   key={idx} 
-                  className={`w-3 h-3 rounded-full ${idx === fullscreenWazaIndex ? 'bg-red-600' : 'bg-slate-300'}`}
+                  onClick={() => {
+                    if (isCoordinator) {
+                      setReleasedWazaIndex(idx);
+                      if (channelRef.current) {
+                        channelRef.current.send({
+                          type: 'broadcast',
+                          event: 'release_waza',
+                          payload: { index: idx }
+                        });
+                      }
+                    }
+                    setFullscreenWazaIndex(idx);
+                  }}
+                  className={`w-3 h-3 rounded-full transition-all ${idx === fullscreenWazaIndex ? 'bg-red-600 scale-125' : 'bg-slate-300 hover:bg-slate-400'}`}
                 />
               ))}
             </div>
@@ -3796,12 +4066,33 @@ export default function App() {
                   : (isHighDan && (!highDanEval.creativity || !highDanEval.innovation || !highDanEval.efficiency))
               )}
               onClick={() => {
+                if (!isCoordinator && channelRef.current) {
+                  channelRef.current.send({
+                    type: 'broadcast',
+                    event: 'waza_evaluated',
+                    payload: { avaliadorId: loggedUser?.id, index: fullscreenWazaIndex }
+                  });
+                }
+                
                 if (fullscreenWazaIndex !== null && fullscreenWazaIndex < wazaList.length - (isHighDan ? 0 : 1)) {
-                  setFullscreenWazaIndex(fullscreenWazaIndex + 1);
+                  const nextIndex = fullscreenWazaIndex + 1;
+                  setFullscreenWazaIndex(nextIndex);
                   setFullscreenActiveTab('kuzushi');
+                  
+                  // Se for o coordenador, já libera a próxima técnica para todos
+                  if (isCoordinator) {
+                    setReleasedWazaIndex(nextIndex);
+                    if (channelRef.current) {
+                      channelRef.current.send({
+                        type: 'broadcast',
+                        event: 'release_waza',
+                        payload: { index: nextIndex }
+                      });
+                    }
+                  }
                 } else {
                   if (!isHighDan && kihonList.length > 0 && selectedTema !== 'Katas') {
-                    setFullscreenKihonIndex(0);
+                    setFullscreenKihonIndex(-1);
                   } else {
                     setShowReport(true);
                     setPendingAutoSave(true);
@@ -3818,19 +4109,32 @@ export default function App() {
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-white p-6 text-center">
               <Activity className="w-12 h-12 text-red-500 mb-4 animate-pulse" />
-              <h2 className="text-2xl font-bold mb-2">Sincronizando Avaliação...</h2>
-              <p className="text-slate-400">Aguardando os dados da técnica.</p>
-              {wazaList.length > 0 && (
-                <p className="text-sm text-slate-500 mt-2">
-                  Técnicas carregadas: {wazaList.length}. Preparando exibição...
-                </p>
+              {isCoordinator ? (
+                <>
+                  <h2 className="text-2xl font-bold mb-6">Pronto para iniciar a avaliação?</h2>
+                  <button 
+                    onClick={() => {
+                      setReleasedWazaIndex(0);
+                      setFullscreenWazaIndex(0);
+                      if (channelRef.current) {
+                        channelRef.current.send({
+                          type: 'broadcast',
+                          event: 'release_waza',
+                          payload: { index: 0 }
+                        });
+                      }
+                    }}
+                    className="px-8 py-4 bg-red-600 hover:bg-red-700 text-white rounded-full font-bold text-xl transition-all shadow-lg shadow-red-900/50 hover:scale-105 active:scale-95"
+                  >
+                    Avaliar Técnica
+                  </button>
+                </>
+              ) : (
+                <>
+                  <h2 className="text-2xl font-bold mb-2">Aguardando liberação do Coordenador</h2>
+                  <p className="text-slate-400">A avaliação iniciará em breve.</p>
+                </>
               )}
-              <button 
-                onClick={() => setFullscreenWazaIndex(null)}
-                className="mt-8 px-6 py-2 bg-slate-800 hover:bg-slate-700 rounded-md transition-colors"
-              >
-                Fechar
-              </button>
             </div>
           )}
         </div>
@@ -3839,7 +4143,97 @@ export default function App() {
       {/* Fullscreen Kihon Evaluation Mode */}
       {fullscreenKihonIndex !== null && !isHighDan && (
         <div className="fixed inset-0 z-50 bg-slate-900 flex flex-col">
-          {kihonList[fullscreenKihonIndex] ? (
+          {fullscreenKihonIndex > releasedKihonIndex ? (
+            <div className="flex-1 bg-black flex flex-col items-center justify-center text-white p-6 relative">
+              <button 
+                onClick={() => setFullscreenKihonIndex(null)}
+                className="absolute top-4 right-4 text-slate-500 hover:text-white transition-colors"
+              >
+                <XCircle className="w-8 h-8" />
+              </button>
+              
+              <div className="flex flex-col items-center justify-center max-w-3xl text-center space-y-8 animate-in zoom-in-95 duration-500">
+                <div className="space-y-2">
+                  <p className="text-blue-500 font-bold tracking-widest uppercase text-sm md:text-base">Próximo Fundamento</p>
+                  <h2 className="text-4xl md:text-6xl lg:text-7xl font-black tracking-wider uppercase text-white drop-shadow-lg">
+                    {kihonList[fullscreenKihonIndex]?.name || `Fundamento ${fullscreenKihonIndex + 1}`}
+                  </h2>
+                </div>
+                
+                <div className="pt-12">
+                  {isCoordinator ? (
+                    <button
+                      disabled={
+                        (() => {
+                          const modulo = modulos.find(m => m.id === selectedModuloId);
+                          if (!modulo || !modulo.avaliadores_ids) return false;
+                          
+                          // Get all evaluators for this module EXCEPT the coordinator themselves
+                          // AND ONLY those who are currently active in the channel
+                          const evaluatorsToWait = modulo.avaliadores_ids.filter(id => 
+                            id !== loggedUser?.id && activeEvaluators.includes(id)
+                          );
+                          
+                          // If there are no other evaluators, don't disable
+                          if (evaluatorsToWait.length === 0) return false;
+                          
+                          // If it's the first kihon, don't wait for previous
+                          if (fullscreenKihonIndex === 0) return false;
+                          
+                          // Check if ALL other evaluators have finished this kihon
+                          const allFinished = evaluatorsToWait.every(id => 
+                            (evaluatorsFinishedKihon[id] !== undefined && evaluatorsFinishedKihon[id] >= fullscreenKihonIndex - 1)
+                          );
+                          
+                          return !allFinished;
+                        })()
+                      }
+                      onClick={() => {
+                        setReleasedKihonIndex(fullscreenKihonIndex);
+                        if (channelRef.current) {
+                          channelRef.current.send({
+                            type: 'broadcast',
+                            event: 'release_kihon',
+                            payload: { index: fullscreenKihonIndex }
+                          });
+                        }
+                      }}
+                      className="px-8 py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-full font-bold text-xl transition-all shadow-lg shadow-blue-900/50 hover:scale-105 active:scale-95 flex items-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:active:scale-100"
+                    >
+                      <span>Liberar Fundamento</span>
+                      {(() => {
+                        const modulo = modulos.find(m => m.id === selectedModuloId);
+                        if (!modulo || !modulo.avaliadores_ids) return null;
+                        
+                        const evaluatorsToWait = modulo.avaliadores_ids.filter(id => 
+                          id !== loggedUser?.id && activeEvaluators.includes(id)
+                        );
+                        
+                        const waitingCount = evaluatorsToWait.filter(id => 
+                          (evaluatorsFinishedKihon[id] || 0) < fullscreenKihonIndex - 1
+                        ).length;
+                        
+                        if (waitingCount > 0) {
+                          return (
+                            <span className="text-sm font-normal text-blue-200 ml-2">
+                              ({waitingCount} pendente{waitingCount > 1 ? 's' : ''})
+                            </span>
+                          );
+                        }
+                        return null;
+                      })()}
+                      <ArrowRight className="w-6 h-6" />
+                    </button>
+                  ) : (
+                    <div className="flex flex-col items-center gap-4 opacity-70">
+                      <div className="w-10 h-10 border-4 border-slate-700 border-t-blue-500 rounded-full animate-spin"></div>
+                      <p className="text-slate-400 font-medium uppercase tracking-widest text-sm">Aguardando liberação do coordenador...</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : kihonList[fullscreenKihonIndex] ? (
             <>
               {/* Header */}
               <div className="bg-slate-800 text-white p-3 sm:p-4 flex flex-col shadow-md relative min-h-[6rem] gap-3">
@@ -3892,8 +4286,29 @@ export default function App() {
                         onClick={() => {
                           updateKihon(kihonList[fullscreenKihonIndex].id, option as PhaseStatus);
                           setTimeout(() => {
+                            if (!isCoordinator && channelRef.current) {
+                              channelRef.current.send({
+                                type: 'broadcast',
+                                event: 'kihon_evaluated',
+                                payload: { avaliadorId: loggedUser?.id, index: fullscreenKihonIndex }
+                              });
+                            }
+                            
                             if (fullscreenKihonIndex < kihonList.length - 1) {
-                              setFullscreenKihonIndex(fullscreenKihonIndex + 1);
+                              const nextIndex = fullscreenKihonIndex + 1;
+                              setFullscreenKihonIndex(nextIndex);
+                              
+                              // Se for o coordenador, já libera a próxima técnica para todos
+                              if (isCoordinator) {
+                                setReleasedKihonIndex(nextIndex);
+                                if (channelRef.current) {
+                                  channelRef.current.send({
+                                    type: 'broadcast',
+                                    event: 'release_kihon',
+                                    payload: { index: nextIndex }
+                                  });
+                                }
+                              }
                             } else {
                               setFullscreenKihonIndex(null);
                               setShowReport(true);
@@ -3925,7 +4340,18 @@ export default function App() {
                         setFullscreenActiveTab('kake');
                       }
                     } else {
-                      setFullscreenKihonIndex(fullscreenKihonIndex - 1);
+                      const prevIndex = fullscreenKihonIndex - 1;
+                      if (isCoordinator) {
+                        setReleasedKihonIndex(prevIndex);
+                        if (channelRef.current) {
+                          channelRef.current.send({
+                            type: 'broadcast',
+                            event: 'release_kihon',
+                            payload: { index: prevIndex }
+                          });
+                        }
+                      }
+                      setFullscreenKihonIndex(prevIndex);
                     }
                   }}
                   className="px-6 py-2 bg-slate-100 text-slate-700 rounded-md font-medium hover:bg-slate-200 transition-colors"
@@ -3935,9 +4361,24 @@ export default function App() {
                 
                 <div className="flex gap-2">
                   {kihonList.map((_, idx) => (
-                    <div 
+                    <button 
                       key={idx} 
-                      className={`w-3 h-3 rounded-full ${idx === fullscreenKihonIndex ? 'bg-blue-600' : 'bg-slate-300'}`}
+                      onClick={() => {
+                        if (isCoordinator) {
+                          setReleasedKihonIndex(idx);
+                          if (channelRef.current) {
+                            channelRef.current.send({
+                              type: 'broadcast',
+                              event: 'release_kihon',
+                              payload: { index: idx }
+                            });
+                          }
+                        }
+                        setFullscreenKihonIndex(idx);
+                      }}
+                      disabled={!isCoordinator && idx > 0 && kihonList[idx-1]?.status === 'AVALIAR'}
+                      className={`w-3 h-3 rounded-full transition-all ${idx === fullscreenKihonIndex ? 'bg-blue-600 scale-125' : 'bg-slate-300 hover:bg-slate-400'} disabled:opacity-30`}
+                      title={kihonList[idx]?.name}
                     />
                   ))}
                 </div>
@@ -3945,8 +4386,29 @@ export default function App() {
                 <button
                   disabled={!isCoordinator && kihonList[fullscreenKihonIndex]?.status === 'AVALIAR'}
                   onClick={() => {
+                    if (!isCoordinator && channelRef.current) {
+                      channelRef.current.send({
+                        type: 'broadcast',
+                        event: 'kihon_evaluated',
+                        payload: { avaliadorId: loggedUser?.id, index: fullscreenKihonIndex }
+                      });
+                    }
+                    
                     if (fullscreenKihonIndex < kihonList.length - 1) {
-                      setFullscreenKihonIndex(fullscreenKihonIndex + 1);
+                      const nextIndex = fullscreenKihonIndex + 1;
+                      setFullscreenKihonIndex(nextIndex);
+                      
+                      // Se for o coordenador, já libera a próxima técnica para todos
+                      if (isCoordinator) {
+                        setReleasedKihonIndex(nextIndex);
+                        if (channelRef.current) {
+                          channelRef.current.send({
+                            type: 'broadcast',
+                            event: 'release_kihon',
+                            payload: { index: nextIndex }
+                          });
+                        }
+                      }
                     } else {
                       setFullscreenKihonIndex(null);
                       setShowReport(true);
@@ -3962,25 +4424,80 @@ export default function App() {
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-white p-6 text-center">
               <Activity className="w-12 h-12 text-blue-500 mb-4 animate-pulse" />
-              <h2 className="text-2xl font-bold mb-2">Sincronizando Kihon...</h2>
-              <p className="text-slate-400">Aguardando os dados do fundamento.</p>
-              <button 
-                onClick={() => setFullscreenKihonIndex(null)}
-                className="mt-8 px-6 py-2 bg-slate-800 hover:bg-slate-700 rounded-md transition-colors"
-              >
-                Fechar
-              </button>
+              {isCoordinator ? (
+                <>
+                  <h2 className="text-2xl font-bold mb-6">Pronto para iniciar o Kihon?</h2>
+                  <button 
+                    onClick={() => {
+                      setReleasedKihonIndex(0);
+                      setFullscreenKihonIndex(0);
+                      if (channelRef.current) {
+                        channelRef.current.send({
+                          type: 'broadcast',
+                          event: 'release_kihon',
+                          payload: { index: 0 }
+                        });
+                      }
+                    }}
+                    className="px-8 py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-full font-bold text-xl transition-all shadow-lg shadow-blue-900/50 hover:scale-105 active:scale-95"
+                  >
+                    Avaliar Kihon
+                  </button>
+                </>
+              ) : (
+                <>
+                  <h2 className="text-2xl font-bold mb-2">Aguardando liberação do Coordenador</h2>
+                  <p className="text-slate-400">A avaliação do Kihon iniciará em breve.</p>
+                </>
+              )}
             </div>
           )}
         </div>
       )}
 
       {/* Fullscreen Kata Evaluation Mode */}
-      {fullscreenKataIndex !== null && selectedTema === 'Katas' && (
+      {selectedTema === 'Katas' && fullscreenKataIndex !== null && (
         <div className="fixed inset-0 z-50 bg-slate-900 flex flex-col">
-          {kataList[fullscreenKataIndex] ? (
+          {fullscreenKataIndex > releasedKataIndex ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-white p-6 text-center">
+              <BookOpen className="w-12 h-12 text-red-500 mb-4 animate-pulse" />
+              {isCoordinator ? (
+                <>
+                  <h2 className="text-2xl font-bold mb-6">Pronto para iniciar a avaliação de Katas?</h2>
+                  <button 
+                    onClick={() => {
+                      const maxIndex = kataList.length - 1;
+                      setReleasedKataIndex(maxIndex);
+                      setFullscreenKataIndex(0);
+                      if (channelRef.current) {
+                        channelRef.current.send({
+                          type: 'broadcast',
+                          event: 'release_kata',
+                          payload: { index: maxIndex }
+                        });
+                      }
+                    }}
+                    className="px-8 py-4 bg-red-600 hover:bg-red-700 text-white rounded-full font-bold text-xl transition-all shadow-lg shadow-red-900/50 hover:scale-105 active:scale-95"
+                  >
+                    Avaliar Katas
+                  </button>
+                </>
+              ) : (
+                <>
+                  <h2 className="text-2xl font-bold mb-2">Aguardando liberação do Coordenador</h2>
+                  <p className="text-slate-400">A avaliação de Katas iniciará em breve.</p>
+                </>
+              )}
+              <button 
+                onClick={() => setFullscreenKataIndex(null)}
+                className="mt-8 text-slate-500 hover:text-white transition-colors text-sm font-medium uppercase tracking-widest"
+              >
+                Voltar para o Painel
+              </button>
+            </div>
+          ) : kataList[fullscreenKataIndex] ? (
             <>
-              {/* Header */}
+            {/* Header */}
               <div className="bg-slate-800 text-white p-3 sm:p-4 flex flex-col shadow-md relative min-h-[6rem] gap-3">
                 <div className="flex justify-between items-start w-full">
                   <div className="flex items-center gap-2">
@@ -4029,15 +4546,36 @@ export default function App() {
                         <span className="text-sm font-bold text-slate-600 uppercase tracking-wider mb-2 text-center">Pequenos (-1)</span>
                         <div className="flex items-center gap-3">
                           <button 
-                            onClick={() => updateKata(kataList[fullscreenKataIndex].id, 'smallErrors', Math.max(0, kataList[fullscreenKataIndex].smallErrors - 1))}
+                            onClick={() => {
+                              updateKata(kataList[fullscreenKataIndex].id, 'smallErrors', Math.max(0, kataList[fullscreenKataIndex].smallErrors - 1));
+                              if (channelRef.current && loggedUser) {
+                                channelRef.current.send({
+                                  type: 'broadcast',
+                                  event: 'kata_evaluated',
+                                  payload: { avaliadorId: loggedUser.id, index: fullscreenKataIndex }
+                                });
+                              }
+                            }}
                             className="w-10 h-10 rounded-full bg-slate-200 hover:bg-slate-300 flex items-center justify-center text-slate-700 font-bold transition-colors"
                           >
                             -
                           </button>
                           <span className="text-2xl font-black text-slate-800 w-8 text-center">{kataList[fullscreenKataIndex].smallErrors}</span>
                           <button 
-                            onClick={() => updateKata(kataList[fullscreenKataIndex].id, 'smallErrors', kataList[fullscreenKataIndex].smallErrors + 1)}
-                            className="w-10 h-10 rounded-full bg-slate-200 hover:bg-slate-300 flex items-center justify-center text-slate-700 font-bold transition-colors"
+                            onClick={() => {
+                              if (kataList[fullscreenKataIndex].smallErrors < 2) {
+                                updateKata(kataList[fullscreenKataIndex].id, 'smallErrors', kataList[fullscreenKataIndex].smallErrors + 1);
+                                if (channelRef.current && loggedUser) {
+                                  channelRef.current.send({
+                                    type: 'broadcast',
+                                    event: 'kata_evaluated',
+                                    payload: { avaliadorId: loggedUser.id, index: fullscreenKataIndex }
+                                  });
+                                }
+                              }
+                            }}
+                            disabled={kataList[fullscreenKataIndex].smallErrors >= 2}
+                            className="w-10 h-10 rounded-full bg-slate-200 hover:bg-slate-300 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center text-slate-700 font-bold transition-colors"
                           >
                             +
                           </button>
@@ -4049,15 +4587,36 @@ export default function App() {
                         <span className="text-sm font-bold text-amber-700 uppercase tracking-wider mb-2 text-center">Médios (-3)</span>
                         <div className="flex items-center gap-3">
                           <button 
-                            onClick={() => updateKata(kataList[fullscreenKataIndex].id, 'mediumErrors', Math.max(0, kataList[fullscreenKataIndex].mediumErrors - 1))}
+                            onClick={() => {
+                              updateKata(kataList[fullscreenKataIndex].id, 'mediumErrors', Math.max(0, kataList[fullscreenKataIndex].mediumErrors - 1));
+                              if (channelRef.current && loggedUser) {
+                                channelRef.current.send({
+                                  type: 'broadcast',
+                                  event: 'kata_evaluated',
+                                  payload: { avaliadorId: loggedUser.id, index: fullscreenKataIndex }
+                                });
+                              }
+                            }}
                             className="w-10 h-10 rounded-full bg-amber-200 hover:bg-amber-300 flex items-center justify-center text-amber-800 font-bold transition-colors"
                           >
                             -
                           </button>
                           <span className="text-2xl font-black text-amber-900 w-8 text-center">{kataList[fullscreenKataIndex].mediumErrors}</span>
                           <button 
-                            onClick={() => updateKata(kataList[fullscreenKataIndex].id, 'mediumErrors', kataList[fullscreenKataIndex].mediumErrors + 1)}
-                            className="w-10 h-10 rounded-full bg-amber-200 hover:bg-amber-300 flex items-center justify-center text-amber-800 font-bold transition-colors"
+                            onClick={() => {
+                              if (kataList[fullscreenKataIndex].mediumErrors < 1) {
+                                updateKata(kataList[fullscreenKataIndex].id, 'mediumErrors', kataList[fullscreenKataIndex].mediumErrors + 1);
+                                if (channelRef.current && loggedUser) {
+                                  channelRef.current.send({
+                                    type: 'broadcast',
+                                    event: 'kata_evaluated',
+                                    payload: { avaliadorId: loggedUser.id, index: fullscreenKataIndex }
+                                  });
+                                }
+                              }
+                            }}
+                            disabled={kataList[fullscreenKataIndex].mediumErrors >= 1}
+                            className="w-10 h-10 rounded-full bg-amber-200 hover:bg-amber-300 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center text-amber-800 font-bold transition-colors"
                           >
                             +
                           </button>
@@ -4069,15 +4628,36 @@ export default function App() {
                         <span className="text-sm font-bold text-red-700 uppercase tracking-wider mb-2 text-center">Graves (-5)</span>
                         <div className="flex items-center gap-3">
                           <button 
-                            onClick={() => updateKata(kataList[fullscreenKataIndex].id, 'graveErrors', Math.max(0, kataList[fullscreenKataIndex].graveErrors - 1))}
+                            onClick={() => {
+                              updateKata(kataList[fullscreenKataIndex].id, 'graveErrors', Math.max(0, kataList[fullscreenKataIndex].graveErrors - 1));
+                              if (channelRef.current && loggedUser) {
+                                channelRef.current.send({
+                                  type: 'broadcast',
+                                  event: 'kata_evaluated',
+                                  payload: { avaliadorId: loggedUser.id, index: fullscreenKataIndex }
+                                });
+                              }
+                            }}
                             className="w-10 h-10 rounded-full bg-red-200 hover:bg-red-300 flex items-center justify-center text-red-800 font-bold transition-colors"
                           >
                             -
                           </button>
                           <span className="text-2xl font-black text-red-900 w-8 text-center">{kataList[fullscreenKataIndex].graveErrors}</span>
                           <button 
-                            onClick={() => updateKata(kataList[fullscreenKataIndex].id, 'graveErrors', kataList[fullscreenKataIndex].graveErrors + 1)}
-                            className="w-10 h-10 rounded-full bg-red-200 hover:bg-red-300 flex items-center justify-center text-red-800 font-bold transition-colors"
+                            onClick={() => {
+                              if (kataList[fullscreenKataIndex].graveErrors < 1) {
+                                updateKata(kataList[fullscreenKataIndex].id, 'graveErrors', kataList[fullscreenKataIndex].graveErrors + 1);
+                                if (channelRef.current && loggedUser) {
+                                  channelRef.current.send({
+                                    type: 'broadcast',
+                                    event: 'kata_evaluated',
+                                    payload: { avaliadorId: loggedUser.id, index: fullscreenKataIndex }
+                                  });
+                                }
+                              }
+                            }}
+                            disabled={kataList[fullscreenKataIndex].graveErrors >= 1}
+                            className="w-10 h-10 rounded-full bg-red-200 hover:bg-red-300 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center text-red-800 font-bold transition-colors"
                           >
                             +
                           </button>
@@ -4095,6 +4675,16 @@ export default function App() {
                             omitted: false,
                             evaluated: true
                           });
+                          if (channelRef.current && loggedUser) {
+                            channelRef.current.send({
+                              type: 'broadcast',
+                              event: 'kata_evaluated',
+                              payload: {
+                                avaliadorId: loggedUser.id,
+                                index: fullscreenKataIndex
+                              }
+                            });
+                          }
                         }}
                         className={`px-4 py-2 rounded-lg font-medium transition-colors ${
                           kataList[fullscreenKataIndex].evaluated && 
@@ -4112,7 +4702,19 @@ export default function App() {
                         <input 
                           type="checkbox" 
                           checked={kataList[fullscreenKataIndex].omitted} 
-                          onChange={(e) => updateKata(kataList[fullscreenKataIndex].id, 'omitted', e.target.checked)} 
+                          onChange={(e) => {
+                            updateKata(kataList[fullscreenKataIndex].id, 'omitted', e.target.checked);
+                            if (channelRef.current && loggedUser) {
+                              channelRef.current.send({
+                                type: 'broadcast',
+                                event: 'kata_evaluated',
+                                payload: {
+                                  avaliadorId: loggedUser.id,
+                                  index: fullscreenKataIndex
+                                }
+                              });
+                            }
+                          }} 
                           className="w-5 h-5 text-red-600 rounded focus:ring-red-500" 
                         />
                         <span className="font-semibold text-slate-700">Técnica Omitida (Nota 0)</span>
@@ -4127,7 +4729,8 @@ export default function App() {
                 <button
                   onClick={() => {
                     if (fullscreenKataIndex > 0) {
-                      setFullscreenKataIndex(fullscreenKataIndex - 1);
+                      const prevIndex = fullscreenKataIndex - 1;
+                      setFullscreenKataIndex(prevIndex);
                     }
                   }}
                   disabled={fullscreenKataIndex === 0}
@@ -4138,9 +4741,14 @@ export default function App() {
                 
                 <div className="flex gap-2">
                   {kataList.map((_, idx) => (
-                    <div 
+                    <button 
                       key={idx} 
-                      className={`w-3 h-3 rounded-full ${idx === fullscreenKataIndex ? 'bg-red-600' : 'bg-slate-300'}`}
+                      onClick={() => {
+                        setFullscreenKataIndex(idx);
+                      }}
+                      disabled={!isCoordinator && idx > 0 && !kataList[idx-1]?.evaluated}
+                      className={`w-3 h-3 rounded-full transition-all ${idx === fullscreenKataIndex ? 'bg-red-600 scale-125' : 'bg-slate-300 hover:bg-slate-400'} disabled:opacity-30`}
+                      title={kataList[idx]?.name}
                     />
                   ))}
                 </div>
@@ -4148,8 +4756,20 @@ export default function App() {
                 <button
                   disabled={!isCoordinator && !kataList[fullscreenKataIndex]?.evaluated}
                   onClick={() => {
+                    if (channelRef.current && loggedUser) {
+                      channelRef.current.send({
+                        type: 'broadcast',
+                        event: 'kata_evaluated',
+                        payload: {
+                          avaliadorId: loggedUser.id,
+                          index: fullscreenKataIndex
+                        }
+                      });
+                    }
+
                     if (fullscreenKataIndex < kataList.length - 1) {
-                      setFullscreenKataIndex(fullscreenKataIndex + 1);
+                      const nextIndex = fullscreenKataIndex + 1;
+                      setFullscreenKataIndex(nextIndex);
                     } else {
                       setFullscreenKataIndex(null);
                       setShowReport(true);
@@ -4162,19 +4782,7 @@ export default function App() {
                 </button>
               </div>
             </>
-          ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-white p-6 text-center">
-              <BookOpen className="w-12 h-12 text-red-500 mb-4 animate-pulse" />
-              <h2 className="text-2xl font-bold mb-2">Sincronizando Kata...</h2>
-              <p className="text-slate-400">Aguardando os dados da técnica.</p>
-              <button 
-                onClick={() => setFullscreenKataIndex(null)}
-                className="mt-8 px-6 py-2 bg-slate-800 hover:bg-slate-700 rounded-md transition-colors"
-              >
-                Fechar
-              </button>
-            </div>
-          )}
+          ) : null}
         </div>
       )}
 
