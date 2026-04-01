@@ -1247,7 +1247,7 @@ export default function App() {
     } else if (field === 'kake') {
       if (currentWaza && currentWaza.kuzushi !== 'AVALIAR' && currentWaza.tsukuri !== 'AVALIAR') {
         setTimeout(() => {
-          if (!isCoordinator && channelRef.current) {
+          if (channelRef.current) {
             channelRef.current.send({
               type: 'broadcast',
               event: 'waza_evaluated',
@@ -1255,29 +1255,47 @@ export default function App() {
             });
           }
           
-          if (currentWazaIndex < wazaList.length - (isHighDan ? 0 : 1)) {
-            const nextIndex = currentWazaIndex + 1;
-            setFullscreenWazaIndex(nextIndex);
-            setFullscreenActiveTab('kuzushi'); // Reset tab for next waza
-            
-            // Se for o coordenador, já libera a próxima técnica para todos
-            if (isCoordinator) {
-              setReleasedWazaIndex(nextIndex);
-              if (channelRef.current) {
-                channelRef.current.send({
-                  type: 'broadcast',
-                  event: 'release_waza',
-                  payload: { index: nextIndex }
-                });
+          let canAutoAdvance = true;
+          if (isCoordinator) {
+            const modulo = modulos.find(m => m.id === selectedModuloId);
+            if (modulo && modulo.avaliadores_ids) {
+              const evaluatorsToWait = modulo.avaliadores_ids.filter(id => 
+                id !== loggedUser?.id && activeEvaluators.includes(id)
+              );
+              if (evaluatorsToWait.length > 0) {
+                const allFinished = evaluatorsToWait.every(id => 
+                  (evaluatorsFinishedWaza[id] !== undefined && evaluatorsFinishedWaza[id] >= currentWazaIndex)
+                );
+                if (!allFinished) canAutoAdvance = false;
               }
             }
-          } else {
-            setFullscreenWazaIndex(null); // Close fullscreen if it's the last one
-            if (!isHighDan && kihonList.length > 0 && selectedTema !== 'Katas') {
-              setFullscreenKihonIndex(-1);
+          }
+          
+          if (canAutoAdvance) {
+            if (currentWazaIndex < wazaList.length - (isHighDan ? 0 : 1)) {
+              const nextIndex = currentWazaIndex + 1;
+              setFullscreenWazaIndex(nextIndex);
+              setFullscreenActiveTab('kuzushi'); // Reset tab for next waza
+              
+              // Se for o coordenador, já libera a próxima técnica para todos
+              if (isCoordinator) {
+                setReleasedWazaIndex(nextIndex);
+                if (channelRef.current) {
+                  channelRef.current.send({
+                    type: 'broadcast',
+                    event: 'release_waza',
+                    payload: { index: nextIndex }
+                  });
+                }
+              }
             } else {
-              setShowReport(true);
-              setPendingAutoSave(true);
+              setFullscreenWazaIndex(null); // Close fullscreen if it's the last one
+              if (!isHighDan && kihonList.length > 0 && selectedTema !== 'Katas') {
+                setFullscreenKihonIndex(0);
+              } else {
+                setShowReport(true);
+                setPendingAutoSave(true);
+              }
             }
           }
         }, 400);
@@ -1792,10 +1810,7 @@ export default function App() {
         }));
       }
     }).on('broadcast', { event: 'release_kihon' }, ({ payload }) => {
-      if (!isCoordinator) {
-        setReleasedKihonIndex(payload.index);
-        setFullscreenKihonIndex(payload.index);
-      }
+      setReleasedKihonIndex(payload.index);
     }).on('broadcast', { event: 'kihon_evaluated' }, ({ payload }) => {
       if (isCoordinator) {
         setEvaluatorsFinishedKihon(prev => ({
@@ -2011,11 +2026,14 @@ export default function App() {
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans">
         <div className="bg-white p-8 rounded-xl shadow-lg max-w-md w-full border border-slate-200">
           <div className="flex flex-col items-center mb-8">
-            <div className="bg-red-100 p-4 rounded-full mb-4">
-              <Lock className="w-10 h-10 text-red-700" />
+            <div className="flex justify-center items-center w-full mb-0 pointer-events-none">
+              <img src="/judo_tech_icon.png" alt="Sensei Assistente Digital Logo" className="w-[200px] h-[200px] object-contain ml-[20px]" />
             </div>
-            <h1 className="text-2xl font-bold text-slate-900 text-center">Sensei Assistente Digital</h1>
-            <p className="text-slate-500 text-center mt-2">Acesso do Avaliador ou Candidato</p>
+            <h1 className="text-3xl font-black text-slate-900 text-center tracking-tight leading-tight relative z-10">
+              Sensei Assistente<br/>
+              <span className="text-red-700 font-normal">Digital</span>
+            </h1>
+            <p className="text-slate-500 text-center mt-2">A evolução natural do seu dojo</p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-6">
@@ -2064,10 +2082,10 @@ export default function App() {
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans">
         <div className="bg-white p-8 rounded-xl shadow-lg max-w-md w-full border border-slate-200">
           <div className="flex flex-col items-center mb-8">
-            <div className="bg-red-100 p-4 rounded-full mb-4">
-              <Lock className="w-10 h-10 text-red-700" />
+            <div className="flex justify-center items-center w-full mb-0 pointer-events-none">
+              <img src="/judo_tech_icon.png" alt="Sensei Assistente Digital Logo" className="w-[200px] h-[200px] object-contain ml-[20px]" />
             </div>
-            <h1 className="text-2xl font-bold text-slate-900 text-center">Primeiro Acesso</h1>
+            <h1 className="text-2xl font-bold text-slate-900 text-center relative z-10">Primeiro Acesso</h1>
             <p className="text-slate-500 text-center mt-2">Por segurança, crie uma nova senha para sua conta.</p>
           </div>
 
@@ -2128,10 +2146,12 @@ export default function App() {
       <header className="bg-red-700 text-white p-6 shadow-md">
         <div className="max-w-5xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <Award className="w-8 h-8" />
+            <img src="/judo_tech_icon.png" alt="Logo" className="w-[100px] h-[100px] object-contain brightness-0 invert -mr-[15px]" />
             <div>
-              <h1 className="text-2xl font-bold">Sensei Assistente Digital</h1>
-              <p className="text-red-100 text-sm">Sistema de Avaliação de Exames de Graduação</p>
+              <h1 className="text-2xl font-black tracking-tight">
+                Sensei Assistente <span className="text-red-200 font-normal">Digital</span>
+              </h1>
+              <p className="text-red-100 text-sm">A evolução natural do seu dojo</p>
             </div>
           </div>
           
@@ -3723,6 +3743,19 @@ export default function App() {
 
       </main>
 
+      {/* Footer / Assinatura da Produtora */}
+      <footer className="mt-12 py-6 border-t border-slate-200 bg-white/50 backdrop-blur-sm">
+        <div className="max-w-5xl mx-auto px-4 flex flex-col items-center justify-center text-center">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-slate-500 text-sm">Desenvolvido por</span>
+            <span className="font-bold text-lg text-slate-800 tracking-tight">
+              Judô<span className="text-red-600">Tech</span>
+            </span>
+          </div>
+          <p className="text-xs text-slate-500">Tradição no tatame, inovação na gestão.</p>
+        </div>
+      </footer>
+
       {/* Fullscreen Waza Evaluation Mode */}
       {fullscreenWazaIndex !== null && (
         <div className="fixed inset-0 z-50 bg-slate-900 flex flex-col">
@@ -4060,13 +4093,36 @@ export default function App() {
             </div>
 
             <button
-              disabled={!isCoordinator && fullscreenWazaIndex !== null && (
-                fullscreenWazaIndex < wazaList.length 
+              disabled={(() => {
+                if (fullscreenWazaIndex === null) return false;
+                
+                const currentNotEvaluated = fullscreenWazaIndex < wazaList.length 
                   ? (wazaList[fullscreenWazaIndex].kuzushi === 'AVALIAR' || wazaList[fullscreenWazaIndex].tsukuri === 'AVALIAR' || wazaList[fullscreenWazaIndex].kake === 'AVALIAR')
-                  : (isHighDan && (!highDanEval.creativity || !highDanEval.innovation || !highDanEval.efficiency))
-              )}
+                  : (isHighDan && (!highDanEval.creativity || !highDanEval.innovation || !highDanEval.efficiency));
+
+                if (!isCoordinator) {
+                  return currentNotEvaluated;
+                }
+
+                if (currentNotEvaluated) return true;
+
+                const modulo = modulos.find(m => m.id === selectedModuloId);
+                if (!modulo || !modulo.avaliadores_ids) return false;
+                
+                const evaluatorsToWait = modulo.avaliadores_ids.filter(id => 
+                  id !== loggedUser?.id && activeEvaluators.includes(id)
+                );
+                
+                if (evaluatorsToWait.length === 0) return false;
+                
+                const allFinished = evaluatorsToWait.every(id => 
+                  (evaluatorsFinishedWaza[id] !== undefined && evaluatorsFinishedWaza[id] >= fullscreenWazaIndex)
+                );
+                
+                return !allFinished;
+              })()}
               onClick={() => {
-                if (!isCoordinator && channelRef.current) {
+                if (channelRef.current) {
                   channelRef.current.send({
                     type: 'broadcast',
                     event: 'waza_evaluated',
@@ -4092,7 +4148,7 @@ export default function App() {
                   }
                 } else {
                   if (!isHighDan && kihonList.length > 0 && selectedTema !== 'Katas') {
-                    setFullscreenKihonIndex(-1);
+                    setFullscreenKihonIndex(0);
                   } else {
                     setShowReport(true);
                     setPendingAutoSave(true);
@@ -4100,9 +4156,30 @@ export default function App() {
                   setFullscreenWazaIndex(null);
                 }
               }}
-              className="px-6 py-2 bg-red-600 text-white rounded-md font-medium hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-6 py-2 bg-red-600 text-white rounded-md font-medium hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             >
-              {fullscreenWazaIndex !== null && fullscreenWazaIndex < wazaList.length - (isHighDan ? 0 : 1) ? 'Próxima' : (!isHighDan && kihonList.length > 0 && selectedTema !== 'Katas' ? 'Próxima (Kihon)' : 'Concluir')}
+              <span>{fullscreenWazaIndex !== null && fullscreenWazaIndex < wazaList.length - (isHighDan ? 0 : 1) ? 'Próxima' : (!isHighDan && kihonList.length > 0 && selectedTema !== 'Katas' ? 'Próxima (Kihon)' : 'Concluir')}</span>
+              {isCoordinator && fullscreenWazaIndex !== null && (() => {
+                const modulo = modulos.find(m => m.id === selectedModuloId);
+                if (!modulo || !modulo.avaliadores_ids) return null;
+                
+                const evaluatorsToWait = modulo.avaliadores_ids.filter(id => 
+                  id !== loggedUser?.id && activeEvaluators.includes(id)
+                );
+                
+                const waitingCount = evaluatorsToWait.filter(id => 
+                  (evaluatorsFinishedWaza[id] === undefined || evaluatorsFinishedWaza[id] < fullscreenWazaIndex)
+                ).length;
+                
+                if (waitingCount > 0) {
+                  return (
+                    <span className="text-xs bg-red-800 px-2 py-1 rounded-full">
+                      {waitingCount} pendente{waitingCount > 1 ? 's' : ''}
+                    </span>
+                  );
+                }
+                return null;
+              })()}
             </button>
           </div>
             </>
@@ -4189,18 +4266,19 @@ export default function App() {
                         })()
                       }
                       onClick={() => {
-                        setReleasedKihonIndex(fullscreenKihonIndex);
+                        const maxIndex = kihonList.length - 1;
+                        setReleasedKihonIndex(maxIndex);
                         if (channelRef.current) {
                           channelRef.current.send({
                             type: 'broadcast',
                             event: 'release_kihon',
-                            payload: { index: fullscreenKihonIndex }
+                            payload: { index: maxIndex }
                           });
                         }
                       }}
                       className="px-8 py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-full font-bold text-xl transition-all shadow-lg shadow-blue-900/50 hover:scale-105 active:scale-95 flex items-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:active:scale-100"
                     >
-                      <span>Liberar Fundamento</span>
+                      <span>Liberar Fundamentos</span>
                       {(() => {
                         const modulo = modulos.find(m => m.id === selectedModuloId);
                         if (!modulo || !modulo.avaliadores_ids) return null;
@@ -4297,18 +4375,6 @@ export default function App() {
                             if (fullscreenKihonIndex < kihonList.length - 1) {
                               const nextIndex = fullscreenKihonIndex + 1;
                               setFullscreenKihonIndex(nextIndex);
-                              
-                              // Se for o coordenador, já libera a próxima técnica para todos
-                              if (isCoordinator) {
-                                setReleasedKihonIndex(nextIndex);
-                                if (channelRef.current) {
-                                  channelRef.current.send({
-                                    type: 'broadcast',
-                                    event: 'release_kihon',
-                                    payload: { index: nextIndex }
-                                  });
-                                }
-                              }
                             } else {
                               setFullscreenKihonIndex(null);
                               setShowReport(true);
@@ -4341,16 +4407,6 @@ export default function App() {
                       }
                     } else {
                       const prevIndex = fullscreenKihonIndex - 1;
-                      if (isCoordinator) {
-                        setReleasedKihonIndex(prevIndex);
-                        if (channelRef.current) {
-                          channelRef.current.send({
-                            type: 'broadcast',
-                            event: 'release_kihon',
-                            payload: { index: prevIndex }
-                          });
-                        }
-                      }
                       setFullscreenKihonIndex(prevIndex);
                     }
                   }}
@@ -4364,16 +4420,6 @@ export default function App() {
                     <button 
                       key={idx} 
                       onClick={() => {
-                        if (isCoordinator) {
-                          setReleasedKihonIndex(idx);
-                          if (channelRef.current) {
-                            channelRef.current.send({
-                              type: 'broadcast',
-                              event: 'release_kihon',
-                              payload: { index: idx }
-                            });
-                          }
-                        }
                         setFullscreenKihonIndex(idx);
                       }}
                       disabled={!isCoordinator && idx > 0 && kihonList[idx-1]?.status === 'AVALIAR'}
@@ -4397,18 +4443,6 @@ export default function App() {
                     if (fullscreenKihonIndex < kihonList.length - 1) {
                       const nextIndex = fullscreenKihonIndex + 1;
                       setFullscreenKihonIndex(nextIndex);
-                      
-                      // Se for o coordenador, já libera a próxima técnica para todos
-                      if (isCoordinator) {
-                        setReleasedKihonIndex(nextIndex);
-                        if (channelRef.current) {
-                          channelRef.current.send({
-                            type: 'broadcast',
-                            event: 'release_kihon',
-                            payload: { index: nextIndex }
-                          });
-                        }
-                      }
                     } else {
                       setFullscreenKihonIndex(null);
                       setShowReport(true);
@@ -4429,13 +4463,14 @@ export default function App() {
                   <h2 className="text-2xl font-bold mb-6">Pronto para iniciar o Kihon?</h2>
                   <button 
                     onClick={() => {
-                      setReleasedKihonIndex(0);
+                      const maxIndex = kihonList.length - 1;
+                      setReleasedKihonIndex(maxIndex);
                       setFullscreenKihonIndex(0);
                       if (channelRef.current) {
                         channelRef.current.send({
                           type: 'broadcast',
                           event: 'release_kihon',
-                          payload: { index: 0 }
+                          payload: { index: maxIndex }
                         });
                       }
                     }}
