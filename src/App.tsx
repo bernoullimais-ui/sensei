@@ -4,6 +4,9 @@ import { PlacarResultados } from './components/PlacarResultados';
 import { TreinamentoCapacitacao } from './components/TreinamentoCapacitacao';
 import { TreinamentoParticipantFlow } from './components/TreinamentoParticipantFlow';
 import { AvaliacoesTeoricas } from './components/AvaliacoesTeoricas';
+import { BancoQuestoes } from './components/BancoQuestoes';
+import { ProvasTeoricasAdmin } from './components/ProvasTeoricasAdmin';
+import { RealizarProva } from './components/RealizarProva';
 import { 
   User, 
   Award, 
@@ -35,13 +38,16 @@ import {
   Edit,
   Trophy,
   RefreshCw,
-  ArrowRight
+  ArrowRight,
+  Search,
+  HelpCircle,
+  CheckSquare
 } from 'lucide-react';
 
 type Dan = 'Shodan (1º Dan)' | 'Nidan (2º Dan)' | 'Sandan (3º Dan)' | 'Yondan (4º Dan)' | 'Godan (5º Dan)';
 type PhaseStatus = 'AVALIAR' | 'Realizada' | 'Parcialmente Realizada' | 'Não Realizada' | 'Ótimo' | 'Bom' | 'Regular';
 type HighDanScore = 'AVALIAR' | 'Ótimo' | 'Bom' | 'Regular' | '';
-type ViewState = 'avaliacao' | 'candidatos' | 'avaliadores' | 'tecnicas' | 'katas' | 'resultados' | 'avaliacoes_teoricas' | 'treinamento';
+type ViewState = 'avaliacao' | 'candidatos' | 'avaliadores' | 'tecnicas' | 'katas' | 'resultados' | 'avaliacoes_teoricas' | 'treinamento' | 'banco_questoes' | 'provas_teoricas' | 'realizar_prova';
 
 interface Tecnica {
   id: string;
@@ -68,6 +74,7 @@ interface Candidato {
 
 interface ModuloAvaliacao {
   id: string;
+  nome?: string;
   data: string;
   horario_inicio: string;
   horario_fim: string;
@@ -144,6 +151,11 @@ export default function App() {
   const [filtroResultado, setFiltroResultado] = useState('');
   const [selectedResultados, setSelectedResultados] = useState<Set<string>>(new Set());
   const [resultadosToDelete, setResultadosToDelete] = useState<string[] | null>(null);
+  
+  const [selectedTecnicas, setSelectedTecnicas] = useState<Set<string>>(new Set());
+  const [tecnicasToDelete, setTecnicasToDelete] = useState<string[] | null>(null);
+  const [filtroTecnicaNome, setFiltroTecnicaNome] = useState('');
+  const [filtroTecnicaGrupo, setFiltroTecnicaGrupo] = useState('');
 
   const [toastMessage, setToastMessage] = useState<{ text: string, type: 'error' | 'success' | 'info' } | null>(null);
 
@@ -163,6 +175,7 @@ export default function App() {
   const [modulos, setModulos] = useState<ModuloAvaliacao[]>([]);
   const [resultados, setResultados] = useState<any[]>([]);
   const [resultadosTeoricos, setResultadosTeoricos] = useState<any[]>([]);
+  const [resultadosProvas, setResultadosProvas] = useState<any[]>([]);
   const [isLoadingResultados, setIsLoadingResultados] = useState(false);
   
   // --- Avaliação State ---
@@ -347,21 +360,39 @@ export default function App() {
         .select('*')
         .order('created_at', { ascending: false });
 
+      let queryProvas = supabase
+        .from('prova_resultados')
+        .select(`
+          id,
+          prova_id,
+          candidato_id,
+          nota,
+          finalizada_em,
+          provas_teoricas (titulo)
+        `)
+        .order('finalizada_em', { ascending: false });
+
       if (loggedRole === 'candidato' && loggedUser) {
         query = query.eq('candidato_id', loggedUser.id);
         queryTeoricas = queryTeoricas.eq('candidato_id', loggedUser.id);
+        queryProvas = queryProvas.eq('candidato_id', loggedUser.id);
       }
 
-      const [resData, teoricasData] = await Promise.all([
+      const [resData, teoricasData, provasData] = await Promise.all([
         query,
-        queryTeoricas
+        queryTeoricas,
+        queryProvas
       ]);
 
       if (resData.error) throw resData.error;
       if (teoricasData.error) throw teoricasData.error;
+      if (provasData.error) throw provasData.error;
 
       setResultados(resData.data || []);
       setResultadosTeoricos(teoricasData.data || []);
+      
+      // Armazenar os resultados das provas no estado (vamos criar esse estado)
+      setResultadosProvas(provasData.data || []);
     } catch (error) {
       console.error('Erro ao carregar resultados:', error);
       showToast('Erro ao carregar resultados.', 'error');
@@ -376,12 +407,15 @@ export default function App() {
     try {
       const dbIdsPraticas: string[] = [];
       const dbIdsTeoricas: string[] = [];
+      const dbIdsProvas: string[] = [];
 
       resultadosToDelete.forEach(groupId => {
         const group = aggregatedResultados.find(g => g.id === groupId);
         if (group) {
           if (group.isTeorica) {
             dbIdsTeoricas.push(group.id);
+          } else if (group.isProvaTeorica) {
+            dbIdsProvas.push(group.id);
           } else {
             group.avaliacoes.forEach((av: any) => {
               dbIdsPraticas.push(av.id);
@@ -400,6 +434,11 @@ export default function App() {
         if (error) throw error;
       }
 
+      if (dbIdsProvas.length > 0) {
+        const { error } = await supabase.from('prova_resultados').delete().in('id', dbIdsProvas);
+        if (error) throw error;
+      }
+
       showToast('Avaliações excluídas com sucesso!', 'success');
       setSelectedResultados(new Set());
       setResultadosToDelete(null);
@@ -413,6 +452,28 @@ export default function App() {
   const handleDeleteResultados = (idsToDelete: string[]) => {
     if (!isUserAdmin(loggedUser)) return;
     setResultadosToDelete(idsToDelete);
+  };
+
+  const confirmDeleteTecnicas = async () => {
+    if (!tecnicasToDelete || tecnicasToDelete.length === 0) return;
+    
+    try {
+      const { error } = await supabase.from('tecnicas').delete().in('id', tecnicasToDelete);
+      if (error) throw error;
+      
+      setTecnicas(tecnicas.filter(t => !tecnicasToDelete.includes(t.id)));
+      showToast('Técnicas excluídas com sucesso!', 'success');
+      setSelectedTecnicas(new Set());
+      setTecnicasToDelete(null);
+    } catch (error) {
+      console.error('Erro ao excluir técnicas:', error);
+      showToast('Erro ao excluir técnicas.', 'error');
+    }
+  };
+
+  const handleDeleteTecnicas = (idsToDelete: string[]) => {
+    if (!isUserAdmin(loggedUser)) return;
+    setTecnicasToDelete(idsToDelete);
   };
 
   const aggregatedResultados = useMemo(() => {
@@ -506,15 +567,40 @@ export default function App() {
       };
     });
 
-    return [...praticas, ...teoricas].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  }, [resultados, resultadosTeoricos, modulos]);
+    const provas = resultadosProvas.map(rp => {
+      let finalVeredito = 'Pendente';
+      const percentual = rp.nota * 10; // Convert 0-10 to 0-100%
+      if (percentual >= 70) finalVeredito = 'Aprovado';
+      else if (percentual >= 50) finalVeredito = 'Pendente';
+      else finalVeredito = 'Reprovado';
+
+      const candidato = candidatos.find(c => c.id === rp.candidato_id);
+
+      return {
+        id: rp.id,
+        created_at: rp.finalizada_em,
+        candidato_id: rp.candidato_id,
+        candidato_nome: candidato ? candidato.nome : 'Desconhecido',
+        grau_pretendido: candidato ? candidato.grau_pretendido : 'Desconhecido',
+        modulo_id: 'prova_teorica',
+        modulo_nome: rp.provas_teoricas?.titulo || 'Prova Teórica',
+        media_teorica: percentual,
+        veredito: finalVeredito,
+        avaliadores_count: 1,
+        isProvaTeorica: true,
+        avaliacoes: [rp]
+      };
+    });
+
+    return [...praticas, ...teoricas, ...provas].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }, [resultados, resultadosTeoricos, resultadosProvas, modulos, candidatos]);
 
   const filteredResultados = useMemo(() => {
     return aggregatedResultados.filter(res => {
       const candidato = candidatos.find(c => c.id === res.candidato_id);
       const modulo = modulos.find(m => m.id === res.modulo_id);
       const nomeCandidato = candidato ? candidato.nome : res.candidato_nome || 'Desconhecido';
-      const temaModulo = res.isTeorica ? res.modulo_nome : (modulo ? modulo.tema : 'Desconhecido');
+      const temaModulo = res.isTeorica || res.isProvaTeorica ? res.modulo_nome : (modulo ? (modulo.nome || modulo.tema) : 'Desconhecido');
 
       if (filtroModulo && temaModulo !== filtroModulo) return false;
       if (filtroGrau && res.grau_pretendido !== filtroGrau) return false;
@@ -529,8 +615,8 @@ export default function App() {
     const candidato = candidatos.find(c => c.id === group.candidato_id);
     const modulo = modulos.find(m => m.id === group.modulo_id);
     const nomeCandidato = candidato ? candidato.nome : group.candidato_nome || 'Desconhecido';
-    const temaModulo = modulo ? modulo.tema : 'Desconhecido';
-    const isKatas = temaModulo === 'Katas';
+    const temaModulo = modulo ? (modulo.nome || modulo.tema) : 'Desconhecido';
+    const isKatas = modulo?.tema === 'Katas';
 
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
@@ -2197,6 +2283,14 @@ export default function App() {
               >
                 <FileText className="w-4 h-4" /> Resultados
               </button>
+              {loggedRole === 'candidato' && (
+                <button 
+                  onClick={() => { setMainTab('realizar_prova'); setCurrentView('realizar_prova'); }}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${mainTab === 'realizar_prova' ? 'bg-white text-red-700 shadow-sm' : 'text-red-100 hover:bg-red-700'}`}
+                >
+                  <CheckSquare className="w-4 h-4" /> Minhas Provas
+                </button>
+              )}
               {isUserAdmin(loggedUser) && (
                 <button 
                   onClick={() => { setMainTab('treinamento'); setCurrentView('treinamento'); }}
@@ -2251,7 +2345,19 @@ export default function App() {
               onClick={() => setCurrentView('avaliacoes_teoricas')}
               className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${currentView === 'avaliacoes_teoricas' ? 'bg-red-50 text-red-700 border border-red-200' : 'text-slate-600 hover:bg-slate-50 border border-transparent'}`}
             >
-              <FileText className="w-4 h-4" /> Avaliações Teóricas
+              <FileText className="w-4 h-4" /> Notas Teóricas
+            </button>
+            <button 
+              onClick={() => setCurrentView('banco_questoes')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${currentView === 'banco_questoes' ? 'bg-red-50 text-red-700 border border-red-200' : 'text-slate-600 hover:bg-slate-50 border border-transparent'}`}
+            >
+              <HelpCircle className="w-4 h-4" /> Banco de Questões
+            </button>
+            <button 
+              onClick={() => setCurrentView('provas_teoricas')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${currentView === 'provas_teoricas' ? 'bg-red-50 text-red-700 border border-red-200' : 'text-slate-600 hover:bg-slate-50 border border-transparent'}`}
+            >
+              <CheckSquare className="w-4 h-4" /> Provas Teóricas
             </button>
           </div>
         )}
@@ -2467,6 +2573,14 @@ export default function App() {
                 <Layers className="w-6 h-6 text-red-600" /> Cadastro de Técnicas
               </h2>
               <div className="flex gap-2">
+                {isUserAdmin(loggedUser) && selectedTecnicas.size > 0 && (
+                  <button 
+                    onClick={() => handleDeleteTecnicas(Array.from(selectedTecnicas))}
+                    className="bg-red-100 hover:bg-red-200 text-red-700 px-4 py-2 rounded-md flex items-center gap-2 text-sm font-medium transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4" /> Excluir Selecionados ({selectedTecnicas.size})
+                  </button>
+                )}
                 <button 
                   onClick={() => downloadCSVTemplate('tecnicas')}
                   className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-md flex items-center gap-2 text-sm font-medium transition-colors"
@@ -2500,48 +2614,123 @@ export default function App() {
               <strong>Formato esperado do CSV:</strong> <code>nome, grupo, tipo</code> (A primeira linha deve ser o cabeçalho). Ex: <em>Ippon Seoi Nage, Te-waza, Nage-waza</em>
             </div>
 
+            <div className="flex flex-col md:flex-row gap-4 mb-6">
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-slate-700 mb-1">Pesquisar por Nome</label>
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input 
+                    type="text" 
+                    placeholder="Ex: Uchi Mata" 
+                    className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-red-500 outline-none"
+                    value={filtroTecnicaNome}
+                    onChange={e => setFiltroTecnicaNome(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-slate-700 mb-1">Filtrar por Grupo</label>
+                <select 
+                  className="w-full p-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-red-500 outline-none bg-white"
+                  value={filtroTecnicaGrupo}
+                  onChange={e => setFiltroTecnicaGrupo(e.target.value)}
+                >
+                  <option value="">Todos os Grupos</option>
+                  {Array.from(new Set(tecnicas.map(t => t.grupo).filter(Boolean))).sort().map(grupo => (
+                    <option key={grupo} value={grupo}>{grupo}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
             {tecnicas.length === 0 ? (
               <p className="text-center text-slate-500 py-8">Nenhuma técnica cadastrada.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-200">
-                      <th className="p-3 text-sm font-semibold text-slate-600">Nome da Técnica</th>
-                      <th className="p-3 text-sm font-semibold text-slate-600">Grupo (Koshi, Te, Ashi...)</th>
-                      <th className="p-3 text-sm font-semibold text-slate-600">Tipo</th>
-                      <th className="p-3 text-sm font-semibold text-slate-600 w-16">Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {tecnicas.map((t, i) => (
-                      <tr key={t.id} className="border-b border-slate-100 hover:bg-slate-50">
-                        <td className="p-2">
-                          <input type="text" value={t.nome} onChange={(e) => {
-                            const newT = [...tecnicas]; newT[i].nome = e.target.value; setTecnicas(newT);
-                          }} onBlur={(e) => updateTecnicaDB(t.id, 'nome', e.target.value)} className="w-full p-1.5 border border-transparent hover:border-slate-300 focus:border-red-500 rounded outline-none bg-transparent focus:bg-white" placeholder="Ex: Uchi Mata" />
-                        </td>
-                        <td className="p-2">
-                          <input type="text" value={t.grupo} onChange={(e) => {
-                            const newT = [...tecnicas]; newT[i].grupo = e.target.value; setTecnicas(newT);
-                          }} onBlur={(e) => updateTecnicaDB(t.id, 'grupo', e.target.value)} className="w-full p-1.5 border border-transparent hover:border-slate-300 focus:border-red-500 rounded outline-none bg-transparent focus:bg-white" placeholder="Ex: Ashi-waza" />
-                        </td>
-                        <td className="p-2">
-                          <input type="text" value={t.tipo || ''} onChange={(e) => {
-                            const newT = [...tecnicas]; newT[i].tipo = e.target.value; setTecnicas(newT);
-                          }} onBlur={(e) => updateTecnicaDB(t.id, 'tipo', e.target.value)} className="w-full p-1.5 border border-transparent hover:border-slate-300 focus:border-red-500 rounded outline-none bg-transparent focus:bg-white" placeholder="Ex: Nage-waza" />
-                        </td>
-                        <td className="p-2 text-center">
-                          <button onClick={() => deleteTecnica(t.id)} className="text-slate-400 hover:text-red-500 p-1">
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </td>
+            ) : (() => {
+              const filteredTecnicas = tecnicas.filter(t => {
+                if (filtroTecnicaNome && !t.nome.toLowerCase().includes(filtroTecnicaNome.toLowerCase())) return false;
+                if (filtroTecnicaGrupo && t.grupo !== filtroTecnicaGrupo) return false;
+                return true;
+              });
+
+              return filteredTecnicas.length === 0 ? (
+                <p className="text-center text-slate-500 py-8">Nenhuma técnica encontrada com os filtros atuais.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200">
+                        {isUserAdmin(loggedUser) && (
+                          <th className="p-3 w-12 text-center">
+                            <input 
+                              type="checkbox" 
+                              className="rounded text-red-600 focus:ring-red-500 cursor-pointer"
+                              checked={selectedTecnicas.size === filteredTecnicas.length && filteredTecnicas.length > 0}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedTecnicas(new Set(filteredTecnicas.map(t => t.id)));
+                                } else {
+                                  setSelectedTecnicas(new Set());
+                                }
+                              }}
+                            />
+                          </th>
+                        )}
+                        <th className="p-3 text-sm font-semibold text-slate-600">Nome da Técnica</th>
+                        <th className="p-3 text-sm font-semibold text-slate-600">Grupo (Koshi, Te, Ashi...)</th>
+                        <th className="p-3 text-sm font-semibold text-slate-600">Tipo</th>
+                        <th className="p-3 text-sm font-semibold text-slate-600 w-16">Ações</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                    </thead>
+                    <tbody>
+                      {filteredTecnicas.map((t, i) => {
+                        const originalIndex = tecnicas.findIndex(orig => orig.id === t.id);
+                        return (
+                        <tr key={t.id} className="border-b border-slate-100 hover:bg-slate-50">
+                          {isUserAdmin(loggedUser) && (
+                            <td className="p-3 text-center">
+                              <input 
+                                type="checkbox" 
+                                className="rounded text-red-600 focus:ring-red-500 cursor-pointer"
+                                checked={selectedTecnicas.has(t.id)}
+                                onChange={(e) => {
+                                  const newSelected = new Set(selectedTecnicas);
+                                  if (e.target.checked) {
+                                    newSelected.add(t.id);
+                                  } else {
+                                    newSelected.delete(t.id);
+                                  }
+                                  setSelectedTecnicas(newSelected);
+                                }}
+                              />
+                            </td>
+                          )}
+                          <td className="p-2">
+                            <input type="text" value={t.nome} onChange={(e) => {
+                              const newT = [...tecnicas]; newT[originalIndex].nome = e.target.value; setTecnicas(newT);
+                            }} onBlur={(e) => updateTecnicaDB(t.id, 'nome', e.target.value)} className="w-full p-1.5 border border-transparent hover:border-slate-300 focus:border-red-500 rounded outline-none bg-transparent focus:bg-white" placeholder="Ex: Uchi Mata" />
+                          </td>
+                          <td className="p-2">
+                            <input type="text" value={t.grupo} onChange={(e) => {
+                              const newT = [...tecnicas]; newT[originalIndex].grupo = e.target.value; setTecnicas(newT);
+                            }} onBlur={(e) => updateTecnicaDB(t.id, 'grupo', e.target.value)} className="w-full p-1.5 border border-transparent hover:border-slate-300 focus:border-red-500 rounded outline-none bg-transparent focus:bg-white" placeholder="Ex: Ashi-waza" />
+                          </td>
+                          <td className="p-2">
+                            <input type="text" value={t.tipo || ''} onChange={(e) => {
+                              const newT = [...tecnicas]; newT[originalIndex].tipo = e.target.value; setTecnicas(newT);
+                            }} onBlur={(e) => updateTecnicaDB(t.id, 'tipo', e.target.value)} className="w-full p-1.5 border border-transparent hover:border-slate-300 focus:border-red-500 rounded outline-none bg-transparent focus:bg-white" placeholder="Ex: Nage-waza" />
+                          </td>
+                          <td className="p-2 text-center">
+                            <button onClick={() => handleDeleteTecnicas([t.id])} className="text-slate-400 hover:text-red-500 p-1">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      )})}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -2630,6 +2819,21 @@ export default function App() {
           <AvaliacoesTeoricas />
         )}
 
+        {/* VIEW: BANCO DE QUESTÕES */}
+        {isUserAdmin(loggedUser) && mainTab === 'configuracao' && currentView === 'banco_questoes' && (
+          <BancoQuestoes />
+        )}
+
+        {/* VIEW: PROVAS TEÓRICAS */}
+        {isUserAdmin(loggedUser) && mainTab === 'configuracao' && currentView === 'provas_teoricas' && (
+          <ProvasTeoricasAdmin />
+        )}
+
+        {/* VIEW: REALIZAR PROVA (CANDIDATO) */}
+        {loggedRole === 'candidato' && mainTab === 'realizar_prova' && currentView === 'realizar_prova' && (
+          <RealizarProva candidatoId={loggedUser.id} />
+        )}
+
         {/* VIEW: AVALIAÇÃO */}
         {mainTab === 'avaliacao' && !selectedModuloId && (
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 animate-in fade-in">
@@ -2651,6 +2855,10 @@ export default function App() {
               <div className="bg-slate-50 p-6 rounded-lg border border-slate-200 mb-8 animate-in slide-in-from-top-4">
                 <h3 className="font-semibold text-lg mb-4 text-slate-800">{editingModuloId ? 'Editar Módulo de Avaliação' : 'Criar Novo Módulo de Avaliação'}</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+                  <div className="lg:col-span-3">
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Nome do Módulo</label>
+                    <input type="text" className="w-full p-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-red-500 outline-none" placeholder="Ex: Exame de Faixa Preta 2026 - Turma A" value={newModulo.nome || ''} onChange={e => setNewModulo({...newModulo, nome: e.target.value})} />
+                  </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Data</label>
                     <input type="date" className="w-full p-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-red-500 outline-none" value={newModulo.data || ''} onChange={e => setNewModulo({...newModulo, data: e.target.value})} />
@@ -2796,7 +3004,9 @@ export default function App() {
                       <Edit className="w-4 h-4" />
                     </button>
                   )}
-                  <div className="font-bold text-lg mb-3 text-slate-800 line-clamp-2 pr-8">{m.tema || 'Sem Tema'}</div>
+                  <div className="font-bold text-lg mb-1 text-slate-800 line-clamp-2 pr-8">{m.nome || m.tema || 'Sem Nome'}</div>
+                  {m.nome && m.tema && <div className="text-xs font-medium text-red-600 mb-3 bg-red-50 inline-block px-2 py-1 rounded">{m.tema}</div>}
+                  {!m.nome && <div className="mb-3"></div>}
                   <div className="text-sm text-slate-600 space-y-2 flex-grow">
                     <p className="flex items-center gap-2"><span className="font-medium w-16">Data:</span> {m.data ? m.data.split('-').reverse().join('/') : 'N/A'}</p>
                     <p className="flex items-center gap-2"><span className="font-medium w-16">Horário:</span> {m.horario_inicio || '--:--'} às {m.horario_fim || '--:--'}</p>
@@ -3658,7 +3868,7 @@ export default function App() {
                   <option value="">Todos</option>
                   {Array.from(new Set(aggregatedResultados.map(res => {
                     const modulo = modulos.find(m => m.id === res.modulo_id);
-                    return res.isTeorica ? res.modulo_nome : (modulo ? modulo.tema : 'Desconhecido');
+                    return res.isTeorica || res.isProvaTeorica ? res.modulo_nome : (modulo ? modulo.tema : 'Desconhecido');
                   }))).map(tema => (
                     <option key={tema} value={tema}>{tema}</option>
                   ))}
@@ -3733,8 +3943,8 @@ export default function App() {
                       const candidato = candidatos.find(c => c.id === res.candidato_id);
                       const modulo = modulos.find(m => m.id === res.modulo_id);
                       const nomeCandidato = candidato ? candidato.nome : res.candidato_nome || 'Desconhecido';
-                      const temaModulo = res.isTeorica ? res.modulo_nome : (modulo ? modulo.tema : 'Desconhecido');
-                      const isKatas = temaModulo === 'Katas';
+                      const temaModulo = res.isTeorica || res.isProvaTeorica ? res.modulo_nome : (modulo ? (modulo.nome || modulo.tema) : 'Desconhecido');
+                      const isKatas = modulo?.tema === 'Katas';
                       
                       return (
                         <tr key={res.id} className="hover:bg-slate-50 transition-colors">
@@ -3767,10 +3977,11 @@ export default function App() {
                           </td>
                           <td className="p-3 text-sm text-slate-600">
                             {temaModulo} {res.isTeorica && <span className="text-xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded ml-1">Teórica</span>}
+                            {res.isProvaTeorica && <span className="text-xs bg-purple-100 text-purple-800 px-1.5 py-0.5 rounded ml-1">Prova</span>}
                           </td>
                           <td className="p-3 text-sm text-slate-600">
-                            {res.isTeorica 
-                              ? (res.media_teorica !== null && res.media_teorica !== undefined ? `${res.media_teorica}%` : '-')
+                            {res.isTeorica || res.isProvaTeorica
+                              ? (res.media_teorica !== null && res.media_teorica !== undefined ? `${res.media_teorica.toFixed(1)}%` : '-')
                               : isKatas 
                                 ? (res.nota_kata !== null && res.nota_kata !== undefined ? `${res.nota_kata}%` : '-')
                                 : (res.percentual_waza !== null && res.percentual_waza !== undefined ? `${res.percentual_waza}%` : '-')
@@ -3785,7 +3996,7 @@ export default function App() {
                               }`}>
                                 {res.veredito}
                               </span>
-                              {!res.isTeorica && (
+                              {!res.isTeorica && !res.isProvaTeorica && (
                                 <span className="text-xs text-slate-400">
                                   {res.avaliadores_count} avaliador{res.avaliadores_count !== 1 ? 'es' : ''}
                                 </span>
@@ -3794,7 +4005,7 @@ export default function App() {
                           </td>
                           <td className="p-3 text-center">
                             <div className="flex items-center justify-center gap-2">
-                              {!res.isTeorica && (
+                              {!res.isTeorica && !res.isProvaTeorica && (
                                 <button 
                                   onClick={() => handlePrintResult(res)}
                                   className="text-slate-500 hover:text-red-600 p-2 rounded-full hover:bg-red-50 transition-colors"
@@ -5077,6 +5288,36 @@ export default function App() {
               </button>
               <button 
                 onClick={confirmDeleteResultados}
+                className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 font-medium transition-colors flex items-center gap-2"
+              >
+                <Trash2 className="w-4 h-4" />
+                Sim, Excluir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmação de Exclusão de Técnicas */}
+      {tecnicasToDelete && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 animate-in fade-in">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 animate-in zoom-in-95">
+            <div className="flex items-center gap-3 mb-4 text-red-600">
+              <AlertTriangle className="w-8 h-8" />
+              <h3 className="text-xl font-bold">Confirmar Exclusão</h3>
+            </div>
+            <p className="text-slate-600 mb-6">
+              Tem certeza que deseja excluir {tecnicasToDelete.length === 1 ? 'esta técnica' : `estas ${tecnicasToDelete.length} técnicas`}? Esta ação não pode ser desfeita e os dados serão removidos do banco de dados.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button 
+                onClick={() => setTecnicasToDelete(null)}
+                className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-md font-medium transition-colors"
+              >
+                Cancelar
+              </button>
+              <button 
+                onClick={confirmDeleteTecnicas}
                 className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 font-medium transition-colors flex items-center gap-2"
               >
                 <Trash2 className="w-4 h-4" />
