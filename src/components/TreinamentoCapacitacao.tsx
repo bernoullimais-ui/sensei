@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { addToSyncQueue } from '../lib/offlineSync';
 import { ActionModal } from './ActionModal';
 import { 
   Users, BookOpen, CheckCircle, AlertTriangle, 
@@ -59,7 +60,7 @@ export function TreinamentoCapacitacao({ loggedUser, loggedRole }: TreinamentoCa
   const fetchTreinamentos = async () => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase.from('treinamentos').select('*').order('created_at', { ascending: false });
+      const { data, error } = await supabase.from('treinamentos').select('*').eq('organizacao_id', loggedUser?.organizacao_id).order('created_at', { ascending: false });
       if (error) {
         // Se a tabela não existir, não quebra, apenas mostra vazio
         if (error.code === '42P01') {
@@ -92,7 +93,8 @@ export function TreinamentoCapacitacao({ loggedUser, loggedRole }: TreinamentoCa
           const { data, error } = await supabase.from('treinamentos').insert([{
             nome,
             data: new Date().toISOString().split('T')[0],
-            status: 'configuracao'
+            status: 'configuracao',
+            organizacao_id: loggedUser?.organizacao_id
           }]).select();
 
           if (error) throw error;
@@ -330,7 +332,7 @@ function TreinamentoDetail({ treinamento, onBack, isAdmin, loggedUser }: any) {
       const [partRes, tecRes, allTecRes] = await Promise.all([
         supabase.from('treinamento_participantes').select('*').eq('treinamento_id', treinamento.id).order('nome'),
         supabase.from('treinamento_tecnicas').select('*').eq('treinamento_id', treinamento.id).order('fase').order('ordem'),
-        supabase.from('tecnicas').select('*').order('nome')
+        supabase.from('tecnicas').select('*').eq('organizacao_id', loggedUser?.organizacao_id).order('nome')
       ]);
 
       if (partRes.data) setParticipantes(partRes.data);
@@ -385,7 +387,8 @@ function TreinamentoDetail({ treinamento, onBack, isAdmin, loggedUser }: any) {
           const { data, error } = await supabase.from('treinamento_participantes').insert([{
             treinamento_id: treinamento.id,
             nome,
-            is_coordenador: isCoordenador
+            is_coordenador: isCoordenador,
+            organizacao_id: treinamento.organizacao_id
           }]).select();
 
           if (error) throw error;
@@ -456,7 +459,8 @@ function TreinamentoDetail({ treinamento, onBack, isAdmin, loggedUser }: any) {
           zempo,
           nome,
           dojo,
-          is_coordenador: isCoordenador
+          is_coordenador: isCoordenador,
+          organizacao_id: treinamento.organizacao_id
         });
       }
 
@@ -534,7 +538,8 @@ function TreinamentoDetail({ treinamento, onBack, isAdmin, loggedUser }: any) {
           treinamento_id: treinamento.id,
           nome,
           fase,
-          ordem: startOrdem + index
+          ordem: startOrdem + index,
+          organizacao_id: treinamento.organizacao_id
         }));
 
         try {
@@ -881,33 +886,54 @@ function TreinamentoGabarito({ treinamento, tecnicas, participantes }: any) {
 
     try {
       const existing = avaliacoes.find(a => a.tecnica_id === activeTecnica.id);
+      
+      const payload = {
+        treinamento_id: treinamento.id,
+        tecnica_id: activeTecnica.id,
+        participante_id: coordenador.id,
+        is_gabarito: true,
+        desequilibrio: localAvaliacao.desequilibrio,
+        preparacao: localAvaliacao.preparacao,
+        execucao: localAvaliacao.execucao,
+        organizacao_id: treinamento.organizacao_id
+      };
 
-      if (existing) {
-        const { data, error } = await supabase
-          .from('treinamento_avaliacoes')
-          .update({
-            desequilibrio: localAvaliacao.desequilibrio,
-            preparacao: localAvaliacao.preparacao,
-            execucao: localAvaliacao.execucao
-          })
-          .eq('id', existing.id)
-          .select();
-        if (error) throw error;
-        if (data) setAvaliacoes(prev => prev.map(a => a.id === existing.id ? data[0] : a));
+      if (!navigator.onLine) {
+        // Offline save
+        const tempId = existing ? existing.id : crypto.randomUUID();
+        const offlineData = { id: tempId, ...payload };
+        
+        addToSyncQueue({
+          type: 'treinamento_avaliacao',
+          payload: offlineData
+        });
+        
+        if (existing) {
+          setAvaliacoes(prev => prev.map(a => a.id === existing.id ? offlineData : a));
+        } else {
+          setAvaliacoes([...avaliacoes, offlineData]);
+        }
+        // alert('Salvo offline. Sincronizará quando houver conexão.');
       } else {
-        const { data, error } = await supabase
-          .from('treinamento_avaliacoes')
-          .insert([{
-            treinamento_id: treinamento.id,
-            tecnica_id: activeTecnica.id,
-            participante_id: coordenador.id,
-            is_gabarito: true,
-            desequilibrio: localAvaliacao.desequilibrio,
-            preparacao: localAvaliacao.preparacao,
-            execucao: localAvaliacao.execucao
-          }]).select();
-        if (error) throw error;
-        if (data) setAvaliacoes([...avaliacoes, data[0]]);
+        if (existing) {
+          const { data, error } = await supabase
+            .from('treinamento_avaliacoes')
+            .update({
+              desequilibrio: localAvaliacao.desequilibrio,
+              preparacao: localAvaliacao.preparacao,
+              execucao: localAvaliacao.execucao
+            })
+            .eq('id', existing.id)
+            .select();
+          if (error) throw error;
+          if (data) setAvaliacoes(prev => prev.map(a => a.id === existing.id ? data[0] : a));
+        } else {
+          const { data, error } = await supabase
+            .from('treinamento_avaliacoes')
+            .insert([payload]).select();
+          if (error) throw error;
+          if (data) setAvaliacoes([...avaliacoes, data[0]]);
+        }
       }
 
       // Move to next technique or close
@@ -1329,32 +1355,53 @@ export function TreinamentoExecution({ treinamento, participantes, tecnicas, onB
     try {
       const existing = avaliacoes.find(a => a.tecnica_id === activeTecnica.id);
 
-      if (existing) {
-        const { data, error } = await supabase
-          .from('treinamento_avaliacoes')
-          .update({
-            desequilibrio: localAvaliacao.desequilibrio,
-            preparacao: localAvaliacao.preparacao,
-            execucao: localAvaliacao.execucao
-          })
-          .eq('id', existing.id)
-          .select();
-        if (error) throw error;
-        if (data) setAvaliacoes(prev => prev.map(a => a.id === existing.id ? data[0] : a));
+      const payload = {
+        treinamento_id: treinamento.id,
+        tecnica_id: activeTecnica.id,
+        participante_id: activeParticipant.id,
+        is_gabarito: false,
+        desequilibrio: localAvaliacao.desequilibrio,
+        preparacao: localAvaliacao.preparacao,
+        execucao: localAvaliacao.execucao,
+        organizacao_id: treinamento.organizacao_id
+      };
+
+      if (!navigator.onLine) {
+        // Offline save
+        const tempId = existing ? existing.id : crypto.randomUUID();
+        const offlineData = { id: tempId, ...payload };
+        
+        addToSyncQueue({
+          type: 'treinamento_avaliacao',
+          payload: offlineData
+        });
+        
+        if (existing) {
+          setAvaliacoes(prev => prev.map(a => a.id === existing.id ? offlineData : a));
+        } else {
+          setAvaliacoes([...avaliacoes, offlineData]);
+        }
+        // alert('Salvo offline. Sincronizará quando houver conexão.');
       } else {
-        const { data, error } = await supabase
-          .from('treinamento_avaliacoes')
-          .insert([{
-            treinamento_id: treinamento.id,
-            tecnica_id: activeTecnica.id,
-            participante_id: activeParticipant.id,
-            is_gabarito: false,
-            desequilibrio: localAvaliacao.desequilibrio,
-            preparacao: localAvaliacao.preparacao,
-            execucao: localAvaliacao.execucao
-          }]).select();
-        if (error) throw error;
-        if (data) setAvaliacoes([...avaliacoes, data[0]]);
+        if (existing) {
+          const { data, error } = await supabase
+            .from('treinamento_avaliacoes')
+            .update({
+              desequilibrio: localAvaliacao.desequilibrio,
+              preparacao: localAvaliacao.preparacao,
+              execucao: localAvaliacao.execucao
+            })
+            .eq('id', existing.id)
+            .select();
+          if (error) throw error;
+          if (data) setAvaliacoes(prev => prev.map(a => a.id === existing.id ? data[0] : a));
+        } else {
+          const { data, error } = await supabase
+            .from('treinamento_avaliacoes')
+            .insert([payload]).select();
+          if (error) throw error;
+          if (data) setAvaliacoes([...avaliacoes, data[0]]);
+        }
       }
 
       // Move to next technique or close
@@ -1409,9 +1456,6 @@ export function TreinamentoExecution({ treinamento, participantes, tecnicas, onB
     return (
       <div>
         <div className="flex items-center gap-4 mb-6 border-b pb-4">
-          <button onClick={() => setActiveParticipant(null)} className="p-2 hover:bg-slate-100 rounded-full text-slate-500 transition-colors">
-            <ArrowLeft className="w-5 h-5" />
-          </button>
           <div>
             <h2 className="text-xl font-bold text-slate-800">{treinamento.nome}</h2>
             <p className="text-sm text-slate-500">Avaliador: <strong>{activeParticipant.nome}</strong></p>
@@ -1584,9 +1628,6 @@ export function TreinamentoExecution({ treinamento, participantes, tecnicas, onB
   return (
     <div>
       <div className="flex items-center gap-4 mb-6 border-b pb-4">
-        <button onClick={() => setActiveParticipant(null)} className="p-2 hover:bg-slate-100 rounded-full text-slate-500 transition-colors">
-          <ArrowLeft className="w-5 h-5" />
-        </button>
         <div>
           <h2 className="text-xl font-bold text-slate-800">{treinamento.nome}</h2>
           <p className="text-sm text-slate-500">

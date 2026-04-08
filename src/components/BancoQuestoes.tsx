@@ -2,7 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { Plus, Trash2, Upload, Download, AlertCircle, HelpCircle, Search } from 'lucide-react';
 
-export function BancoQuestoes() {
+interface BancoQuestoesProps {
+  loggedUser: any;
+}
+
+export function BancoQuestoes({ loggedUser }: BancoQuestoesProps) {
   const [questoes, setQuestoes] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isAdding, setIsAdding] = useState(false);
@@ -33,7 +37,7 @@ export function BancoQuestoes() {
   const fetchQuestoes = async () => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase.from('questoes_teoricas').select('*').order('created_at', { ascending: false });
+      const { data, error } = await supabase.from('questoes_teoricas').select('*').eq('organizacao_id', loggedUser?.organizacao_id).order('created_at', { ascending: false });
       if (error) throw error;
       setQuestoes(data || []);
     } catch (err: any) {
@@ -58,7 +62,8 @@ export function BancoQuestoes() {
         opcao_c: opcaoC,
         opcao_d: opcaoD,
         opcao_e: opcaoE,
-        gabarito
+        gabarito,
+        organizacao_id: loggedUser?.organizacao_id
       }]).select();
 
       if (error) throw error;
@@ -155,7 +160,8 @@ export function BancoQuestoes() {
               opcao_c: values[idxC] || '',
               opcao_d: values[idxD] || '',
               opcao_e: values[idxE] || '',
-              gabarito: gab
+              gabarito: gab,
+              organizacao_id: loggedUser?.organizacao_id
             });
           }
         }

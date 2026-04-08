@@ -2,7 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { FileText, Plus, Trash2, Upload, Download, AlertCircle } from 'lucide-react';
 
-export function AvaliacoesTeoricas() {
+interface AvaliacoesTeoricasProps {
+  loggedUser: any;
+}
+
+export function AvaliacoesTeoricas({ loggedUser }: AvaliacoesTeoricasProps) {
   const [avaliacoes, setAvaliacoes] = useState<any[]>([]);
   const [candidatos, setCandidatos] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -24,8 +28,8 @@ export function AvaliacoesTeoricas() {
     setIsLoading(true);
     try {
       const [avRes, candRes] = await Promise.all([
-        supabase.from('avaliacoes_teoricas').select('*').order('data', { ascending: false }),
-        supabase.from('candidatos').select('*').order('nome')
+        supabase.from('avaliacoes_teoricas').select('*').eq('organizacao_id', loggedUser?.organizacao_id).order('data', { ascending: false }),
+        supabase.from('candidatos').select('*').eq('organizacao_id', loggedUser?.organizacao_id).order('nome')
       ]);
 
       if (avRes.error) throw avRes.error;
@@ -58,7 +62,8 @@ export function AvaliacoesTeoricas() {
         candidato_nome: candidato.nome,
         grau_pretendido: grauPretendido,
         modulo,
-        media: parseFloat(media)
+        media: parseFloat(media),
+        organizacao_id: loggedUser?.organizacao_id
       }]).select();
 
       if (error) throw error;
@@ -156,7 +161,8 @@ export function AvaliacoesTeoricas() {
               candidato_nome: candidatoNome,
               grau_pretendido: grau || 'Shodan (1º Dan)',
               modulo: mod || 'Geral',
-              media: isNaN(med) ? 0 : med
+              media: isNaN(med) ? 0 : med,
+              organizacao_id: loggedUser?.organizacao_id
             });
           }
         }

@@ -4,9 +4,10 @@ import { FileText, Clock, AlertCircle, CheckCircle, ChevronRight, ChevronLeft } 
 
 interface RealizarProvaProps {
   candidatoId: string;
+  loggedUser: any;
 }
 
-export function RealizarProva({ candidatoId }: RealizarProvaProps) {
+export function RealizarProva({ candidatoId, loggedUser }: RealizarProvaProps) {
   const [provasDisponiveis, setProvasDisponiveis] = useState<any[]>([]);
   const [provasRealizadas, setProvasRealizadas] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -48,6 +49,24 @@ export function RealizarProva({ candidatoId }: RealizarProvaProps) {
     return () => clearInterval(timer);
   }, [provaAtiva, tempoRestante]);
 
+  // Auto-save effect
+  useEffect(() => {
+    if (provaAtiva) {
+      const draftKey = `febaju_prova_${candidatoId}_${provaAtiva.id}`;
+      const draftStr = localStorage.getItem(draftKey);
+      if (draftStr) {
+        try {
+          const draft = JSON.parse(draftStr);
+          draft.respostas = respostas;
+          draft.questaoAtualIndex = questaoAtualIndex;
+          localStorage.setItem(draftKey, JSON.stringify(draft));
+        } catch (e) {
+          console.error("Erro ao salvar rascunho", e);
+        }
+      }
+    }
+  }, [respostas, questaoAtualIndex, provaAtiva, candidatoId]);
+
   const fetchProvas = async () => {
     setIsLoading(true);
     try {
@@ -55,6 +74,7 @@ export function RealizarProva({ candidatoId }: RealizarProvaProps) {
       const { data: provas, error: provasError } = await supabase
         .from('provas_teoricas')
         .select('*')
+        .eq('organizacao_id', loggedUser?.organizacao_id)
         .order('data_inicio', { ascending: true });
 
       if (provasError && provasError.code !== '42P01') throw provasError;
@@ -63,7 +83,8 @@ export function RealizarProva({ candidatoId }: RealizarProvaProps) {
       const { data: resultados, error: resultadosError } = await supabase
         .from('prova_resultados')
         .select('*')
-        .eq('candidato_id', candidatoId);
+        .eq('candidato_id', candidatoId)
+        .eq('organizacao_id', loggedUser?.organizacao_id);
 
       if (resultadosError && resultadosError.code !== '42P01') throw resultadosError;
 
@@ -127,11 +148,41 @@ export function RealizarProva({ candidatoId }: RealizarProvaProps) {
       // Ordenar conforme a relação
       const questoesOrdenadas = relacoes.map(r => questoes?.find(q => q.id === r.questao_id)).filter(Boolean);
 
+      const draftKey = `febaju_prova_${candidatoId}_${prova.id}`;
+      const draftStr = localStorage.getItem(draftKey);
+      let restoredRespostas = {};
+      let restoredIndex = 0;
+      let calculatedTempoRestante = prova.duracao_minutos * 60;
+      let endTime = Date.now() + prova.duracao_minutos * 60 * 1000;
+
+      if (draftStr) {
+        try {
+          const draft = JSON.parse(draftStr);
+          if (draft.endTime && draft.endTime > Date.now()) {
+            restoredRespostas = draft.respostas || {};
+            restoredIndex = draft.questaoAtualIndex || 0;
+            endTime = draft.endTime;
+            calculatedTempoRestante = Math.floor((endTime - Date.now()) / 1000);
+          } else {
+            localStorage.removeItem(draftKey);
+          }
+        } catch (e) {
+          console.error("Erro ao ler rascunho da prova", e);
+          localStorage.removeItem(draftKey);
+        }
+      }
+
+      localStorage.setItem(draftKey, JSON.stringify({
+        respostas: restoredRespostas,
+        questaoAtualIndex: restoredIndex,
+        endTime
+      }));
+
       setQuestoesProva(questoesOrdenadas);
       setProvaAtiva(prova);
-      setQuestaoAtualIndex(0);
-      setRespostas({});
-      setTempoRestante(prova.duracao_minutos * 60);
+      setQuestaoAtualIndex(restoredIndex);
+      setRespostas(restoredRespostas);
+      setTempoRestante(calculatedTempoRestante);
       setResultadoFinal(null);
     } catch (err: any) {
       console.error('Erro ao iniciar prova:', err);
@@ -177,7 +228,8 @@ export function RealizarProva({ candidatoId }: RealizarProvaProps) {
             prova_id: provaAtiva.id,
             candidato_id: candidatoId,
             questao_id: q.id,
-            resposta: respostaDada
+            resposta: respostaDada,
+            organizacao_id: loggedUser?.organizacao_id
           });
         }
       }
@@ -193,10 +245,15 @@ export function RealizarProva({ candidatoId }: RealizarProvaProps) {
       const { data: resultadoSalvo, error: resError } = await supabase.from('prova_resultados').insert([{
         prova_id: provaAtiva.id,
         candidato_id: candidatoId,
-        nota: notaFinal
+        nota: notaFinal,
+        organizacao_id: loggedUser?.organizacao_id
       }]).select();
 
       if (resError) throw resError;
+
+      // Limpar rascunho
+      const draftKey = `febaju_prova_${candidatoId}_${provaAtiva.id}`;
+      localStorage.removeItem(draftKey);
 
       setResultadoFinal({
         nota: notaFinal,

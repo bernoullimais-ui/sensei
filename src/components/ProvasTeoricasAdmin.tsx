@@ -2,7 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { Plus, Trash2, Calendar, Clock, AlertCircle, CheckSquare, FileText, Edit } from 'lucide-react';
 
-export function ProvasTeoricasAdmin() {
+interface ProvasTeoricasAdminProps {
+  loggedUser: any;
+}
+
+export function ProvasTeoricasAdmin({ loggedUser }: ProvasTeoricasAdminProps) {
   const [provas, setProvas] = useState<any[]>([]);
   const [questoes, setQuestoes] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -35,8 +39,8 @@ export function ProvasTeoricasAdmin() {
     setIsLoading(true);
     try {
       const [provasRes, questoesRes] = await Promise.all([
-        supabase.from('provas_teoricas').select('*').order('created_at', { ascending: false }),
-        supabase.from('questoes_teoricas').select('*').order('created_at', { ascending: false })
+        supabase.from('provas_teoricas').select('*').eq('organizacao_id', loggedUser?.organizacao_id).order('created_at', { ascending: false }),
+        supabase.from('questoes_teoricas').select('*').eq('organizacao_id', loggedUser?.organizacao_id).order('created_at', { ascending: false })
       ]);
 
       if (provasRes.error && provasRes.error.code !== '42P01') throw provasRes.error;
@@ -99,7 +103,8 @@ export function ProvasTeoricasAdmin() {
           titulo,
           data_inicio: inicioIso,
           data_fim: fimIso,
-          duracao_minutos: parseInt(duracaoMinutos)
+          duracao_minutos: parseInt(duracaoMinutos),
+          organizacao_id: loggedUser?.organizacao_id
         }]).select();
 
         if (provaError) throw provaError;
@@ -113,7 +118,8 @@ export function ProvasTeoricasAdmin() {
         const questoesParaInserir = Array.from(selectedQuestoes).map((qId, index) => ({
           prova_id: provaId,
           questao_id: qId,
-          ordem: index + 1
+          ordem: index + 1,
+          organizacao_id: loggedUser?.organizacao_id
         }));
 
         const { error: relError } = await supabase.from('prova_questoes').insert(questoesParaInserir);

@@ -24,15 +24,20 @@ export function PlacarResultados({ moduloId }: PlacarProps) {
     const fetchData = async () => {
       setIsLoading(true);
       try {
-        const [modRes, resRes, candRes] = await Promise.all([
-          supabase.from('modulos_avaliacao').select('*').eq('id', moduloId).single(),
-          supabase.from('avaliacoes').select('*').eq('modulo_id', moduloId).order('created_at', { ascending: false }),
-          supabase.from('candidatos').select('*')
-        ]);
+        const { data: modData, error: modError } = await supabase.from('modulos_avaliacao').select('*').eq('id', moduloId).single();
+        if (modError) throw modError;
+        
+        if (modData) {
+          setModulo(modData);
+          
+          const [resRes, candRes] = await Promise.all([
+            supabase.from('avaliacoes').select('*').eq('modulo_id', moduloId).order('created_at', { ascending: false }),
+            supabase.from('candidatos').select('*').eq('organizacao_id', modData.organizacao_id)
+          ]);
 
-        if (modRes.data) setModulo(modRes.data);
-        if (resRes.data) setResultados(resRes.data);
-        if (candRes.data) setCandidatos(candRes.data);
+          if (resRes.data) setResultados(resRes.data);
+          if (candRes.data) setCandidatos(candRes.data);
+        }
       } catch (error) {
         console.error('Erro ao carregar dados do placar:', error);
       } finally {

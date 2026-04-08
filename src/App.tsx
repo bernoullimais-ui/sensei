@@ -7,6 +7,10 @@ import { AvaliacoesTeoricas } from './components/AvaliacoesTeoricas';
 import { BancoQuestoes } from './components/BancoQuestoes';
 import { ProvasTeoricasAdmin } from './components/ProvasTeoricasAdmin';
 import { RealizarProva } from './components/RealizarProva';
+import { LoginScreen } from './components/LoginScreen';
+import { CandidatoDashboard } from './components/CandidatoDashboard';
+import { SuperAdminPanel } from './components/SuperAdminPanel';
+import { addToSyncQueue, processSyncQueue, getSyncQueue } from './lib/offlineSync';
 import { 
   User, 
   Award, 
@@ -41,7 +45,10 @@ import {
   ArrowRight,
   Search,
   HelpCircle,
-  CheckSquare
+  CheckSquare,
+  ShieldCheck,
+  WifiOff,
+  CloudOff
 } from 'lucide-react';
 
 type Dan = 'Shodan (1º Dan)' | 'Nidan (2º Dan)' | 'Sandan (3º Dan)' | 'Yondan (4º Dan)' | 'Godan (5º Dan)';
@@ -49,11 +56,19 @@ type PhaseStatus = 'AVALIAR' | 'Realizada' | 'Parcialmente Realizada' | 'Não Re
 type HighDanScore = 'AVALIAR' | 'Ótimo' | 'Bom' | 'Regular' | '';
 type ViewState = 'avaliacao' | 'candidatos' | 'avaliadores' | 'tecnicas' | 'katas' | 'resultados' | 'avaliacoes_teoricas' | 'treinamento' | 'banco_questoes' | 'provas_teoricas' | 'realizar_prova';
 
+interface Organizacao {
+  id: string;
+  nome: string;
+  logo_url?: string;
+  cor_primaria?: string;
+}
+
 interface Tecnica {
   id: string;
   nome: string;
   grupo: string;
   tipo?: string;
+  organizacao_id?: string;
 }
 
 interface KataDef {
@@ -61,6 +76,7 @@ interface KataDef {
   nome: string;
   ordem: number;
   grupo: string;
+  organizacao_id?: string;
 }
 
 interface Candidato {
@@ -70,6 +86,7 @@ interface Candidato {
   dojo: string;
   zempo: string;
   senha?: string;
+  organizacao_id?: string;
 }
 
 interface ModuloAvaliacao {
@@ -84,6 +101,7 @@ interface ModuloAvaliacao {
   quantidade_tecnicas?: number;
   avaliadores_ids?: string[];
   coordenadores_ids?: string[];
+  organizacao_id?: string;
 }
 
 interface Avaliador {
@@ -93,6 +111,7 @@ interface Avaliador {
   zempo?: string;
   funcao?: string;
   senha?: string;
+  organizacao_id?: string;
 }
 
 interface Waza {
@@ -126,6 +145,50 @@ interface HighDanEval {
 }
 
 export default function App() {
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [syncQueueLength, setSyncQueueLength] = useState(getSyncQueue().length);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      processSyncQueue();
+    };
+    const handleOffline = () => setIsOnline(false);
+    const handleQueueUpdate = (e: any) => setSyncQueueLength(e.detail.length);
+    const handleBeforeInstallPrompt = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('sync-queue-updated', handleQueueUpdate);
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    // Initial check
+    if (navigator.onLine) {
+      processSyncQueue();
+    }
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('sync-queue-updated', handleQueueUpdate);
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setDeferredPrompt(null);
+      }
+    }
+  };
+
   const [placarModuloId, setPlacarModuloId] = useState<string | null>(null);
   const [treinamentoAccessId, setTreinamentoAccessId] = useState<string | null>(null);
 
@@ -141,8 +204,55 @@ export default function App() {
     }
   }, []);
 
+  useEffect(() => {
+    const fixOssaeWaza = async () => {
+      try {
+        // Fix modulos
+        const { data: modulos, error: modulosError } = await supabase
+          .from('modulos_avaliacao')
+          .select('*')
+          .like('tema', '%Ossae Waza%');
+        
+        if (modulosError) throw modulosError;
+        
+        if (modulos && modulos.length > 0) {
+          for (const modulo of modulos) {
+            const newTema = modulo.tema.replace(/Ossae Waza/g, 'Osae Waza');
+            await supabase
+              .from('modulos_avaliacao')
+              .update({ tema: newTema })
+              .eq('id', modulo.id);
+          }
+          console.log(`Corrigidos ${modulos.length} módulos com Ossae Waza.`);
+        }
+
+        // Fix tecnicas
+        const { data: tecnicas, error: tecnicasError } = await supabase
+          .from('tecnicas')
+          .select('*')
+          .eq('grupo', 'Ossae Waza');
+        
+        if (tecnicasError) throw tecnicasError;
+        
+        if (tecnicas && tecnicas.length > 0) {
+          for (const tecnica of tecnicas) {
+            await supabase
+              .from('tecnicas')
+              .update({ grupo: 'Osae Waza' })
+              .eq('id', tecnica.id);
+          }
+          console.log(`Corrigidas ${tecnicas.length} técnicas com Ossae Waza.`);
+        }
+      } catch (err) {
+        console.error('Erro ao corrigir Ossae Waza:', err);
+      }
+    };
+    
+    fixOssaeWaza();
+  }, []);
+
   const [currentView, setCurrentView] = useState<ViewState>('avaliacao');
-  const [mainTab, setMainTab] = useState<'avaliacao' | 'configuracao' | 'resultados' | 'treinamento'>('avaliacao');
+  const [mainTab, setMainTab] = useState<'avaliacao' | 'configuracao' | 'resultados' | 'treinamento' | 'super_admin'>('avaliacao');
   
   // Filtros para Resultados das Avaliações
   const [filtroModulo, setFiltroModulo] = useState('');
@@ -154,6 +264,7 @@ export default function App() {
   
   const [selectedTecnicas, setSelectedTecnicas] = useState<Set<string>>(new Set());
   const [tecnicasToDelete, setTecnicasToDelete] = useState<string[] | null>(null);
+  const [modulosToDelete, setModulosToDelete] = useState<string[] | null>(null);
   const [filtroTecnicaNome, setFiltroTecnicaNome] = useState('');
   const [filtroTecnicaGrupo, setFiltroTecnicaGrupo] = useState('');
 
@@ -229,12 +340,43 @@ export default function App() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   // --- Login State ---
-  const [loggedUser, setLoggedUser] = useState<Avaliador | Candidato | null>(null);
-  const [loggedRole, setLoggedRole] = useState<'avaliador' | 'candidato' | null>(null);
+  const [loggedUser, setLoggedUser] = useState<any>(null);
+  const [loggedRole, setLoggedRole] = useState<'avaliador' | 'candidato' | 'admin' | 'coordenador' | null>(null);
+  const [orgSettings, setOrgSettings] = useState<{ nome: string, logo_url: string | null, cor_primaria: string } | null>(null);
+  const [editingOrgSettings, setEditingOrgSettings] = useState<{ nome: string, logo_url: string | null, cor_primaria: string } | null>(null);
+  const [isSavingOrg, setIsSavingOrg] = useState(false);
   const [loginZempo, setLoginZempo] = useState('');
   const [senhaZempo, setSenhaZempo] = useState('');
   const [loginError, setLoginError] = useState('');
   const [requirePasswordChange, setRequirePasswordChange] = useState(false);
+
+  // Fetch organization settings
+  useEffect(() => {
+    if (loggedUser?.organizacao_id) {
+      const fetchOrg = async () => {
+        try {
+          const { supabase } = await import('./lib/supabase');
+          const { data, error } = await supabase
+            .from('organizacoes')
+            .select('nome, logo_url, cor_primaria')
+            .eq('id', loggedUser.organizacao_id)
+            .single();
+          
+          if (data && !error) {
+            setOrgSettings(data);
+            // Apply primary color to CSS variables
+            document.documentElement.style.setProperty('--color-primary', data.cor_primaria || '#b91c1c');
+          }
+        } catch (err) {
+          console.error('Error fetching org settings:', err);
+        }
+      };
+      fetchOrg();
+    } else {
+      document.documentElement.style.removeProperty('--color-primary');
+      setOrgSettings(null);
+    }
+  }, [loggedUser?.organizacao_id]);
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [passwordChangeError, setPasswordChangeError] = useState('');
@@ -243,9 +385,44 @@ export default function App() {
   const [pendingAutoSave, setPendingAutoSave] = useState(false);
   const cacheLoadedRef = useRef<string | null>(null);
 
-  const isUserAdmin = (user: Avaliador | Candidato | null) => {
-    if (!user || !('funcao' in user)) return false;
-    return user.funcao === 'gestor' || user.funcao === 'admin' || user.nome?.trim().toLowerCase() === 'bruno maia pereira';
+  // Load session on mount
+  useEffect(() => {
+    const savedSession = localStorage.getItem('judo_tech_session');
+    if (savedSession) {
+      try {
+        const { user, role } = JSON.parse(savedSession);
+        if (user && role) {
+          setLoggedUser(user);
+          setLoggedRole(role);
+          if (role === 'candidato') {
+            setMainTab('realizar_prova');
+            setCurrentView('realizar_prova');
+          } else {
+            setMainTab('avaliacao');
+            setCurrentView('avaliacao');
+            setSelectedAvaliadorId(user.id);
+          }
+        }
+      } catch (e) {
+        console.error('Error parsing saved session', e);
+        localStorage.removeItem('judo_tech_session');
+      }
+    }
+  }, []);
+
+  // Persist session when user changes
+  useEffect(() => {
+    if (loggedUser && loggedRole) {
+      localStorage.setItem('judo_tech_session', JSON.stringify({ user: loggedUser, role: loggedRole }));
+    } else {
+      localStorage.removeItem('judo_tech_session');
+    }
+  }, [loggedUser, loggedRole]);
+
+  const isUserAdmin = (user: any) => {
+    if (!user) return false;
+    const role = user.role || user.funcao;
+    return role === 'gestor' || role === 'admin' || user.nome?.trim().toLowerCase() === 'bruno maia pereira';
   };
 
   // --- Cache Local (Modo Offline) ---
@@ -272,28 +449,82 @@ export default function App() {
   const fileInputKatasRef = useRef<HTMLInputElement>(null);
 
   // --- Fetch Initial Data ---
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [candRes, avalRes, tecRes, kataRes, modulosRes] = await Promise.all([
-          supabase.from('candidatos').select('id, nome, grau_pretendido, dojo, zempo').order('nome', { ascending: true }),
-          supabase.from('avaliadores').select('id, nome, graduacao, zempo, funcao').order('nome', { ascending: true }),
-          supabase.from('tecnicas').select('*').order('nome', { ascending: true }),
-          supabase.from('katas').select('*').order('ordem', { ascending: true }),
-          supabase.from('modulos_avaliacao').select('*').order('data', { ascending: true })
-        ]);
+  const fetchData = useCallback(async () => {
+    if (!loggedUser || !('organizacao_id' in loggedUser) || !loggedUser.organizacao_id) {
+      // Clear data if not logged in
+      setCandidatos([]);
+      setAvaliadores([]);
+      setTecnicas([]);
+      setKatas([]);
+      setModulos([]);
+      return;
+    }
 
-        if (candRes.data) setCandidatos(candRes.data);
-        if (avalRes.data) setAvaliadores(avalRes.data);
-        if (tecRes.data) setTecnicas(tecRes.data);
-        if (kataRes.data) setKatas(kataRes.data);
-        if (modulosRes.data) setModulos(modulosRes.data);
-      } catch (error) {
-        console.error('Erro ao carregar dados:', error);
+    const orgId = loggedUser.organizacao_id;
+    const cacheKey = `app_data_cache_${orgId}`;
+
+    if (!navigator.onLine) {
+      // Load from cache if offline
+      const cachedData = localStorage.getItem(cacheKey);
+      if (cachedData) {
+        try {
+          const parsed = JSON.parse(cachedData);
+          setCandidatos(parsed.candidatos || []);
+          setAvaliadores(parsed.avaliadores || []);
+          setTecnicas(parsed.tecnicas || []);
+          setKatas(parsed.katas || []);
+          setModulos(parsed.modulos || []);
+          console.log('Loaded data from offline cache');
+        } catch (e) {
+          console.error('Error parsing offline cache', e);
+        }
       }
-    };
+      return;
+    }
+
+    try {
+      const [candRes, avalRes, tecRes, kataRes, modulosRes] = await Promise.all([
+        supabase.from('candidatos').select('id, nome, grau_pretendido, dojo, zempo').eq('organizacao_id', orgId).order('nome', { ascending: true }),
+        supabase.from('avaliadores').select('id, nome, graduacao, zempo, funcao').eq('organizacao_id', orgId).order('nome', { ascending: true }),
+        supabase.from('tecnicas').select('*').eq('organizacao_id', orgId).order('nome', { ascending: true }),
+        supabase.from('katas').select('*').eq('organizacao_id', orgId).order('ordem', { ascending: true }),
+        supabase.from('modulos_avaliacao').select('*').eq('organizacao_id', orgId).order('data', { ascending: true })
+      ]);
+
+      if (candRes.data) setCandidatos(candRes.data);
+      if (avalRes.data) setAvaliadores(avalRes.data);
+      if (tecRes.data) setTecnicas(tecRes.data);
+      if (kataRes.data) setKatas(kataRes.data);
+      if (modulosRes.data) setModulos(modulosRes.data);
+
+      // Save to cache
+      localStorage.setItem(cacheKey, JSON.stringify({
+        candidatos: candRes.data || [],
+        avaliadores: avalRes.data || [],
+        tecnicas: tecRes.data || [],
+        katas: kataRes.data || [],
+        modulos: modulosRes.data || []
+      }));
+    } catch (error) {
+      console.error('Erro ao carregar dados:', error);
+      // Fallback to cache on error
+      const cachedData = localStorage.getItem(cacheKey);
+      if (cachedData) {
+        try {
+          const parsed = JSON.parse(cachedData);
+          setCandidatos(parsed.candidatos || []);
+          setAvaliadores(parsed.avaliadores || []);
+          setTecnicas(parsed.tecnicas || []);
+          setKatas(parsed.katas || []);
+          setModulos(parsed.modulos || []);
+        } catch (e) {}
+      }
+    }
+  }, [loggedUser]);
+
+  useEffect(() => {
     fetchData();
-  }, []);
+  }, [fetchData]);
 
   useEffect(() => {
     if (selectedModuloId) {
@@ -327,7 +558,7 @@ export default function App() {
   }, [selectedModuloId, modulos, selectedAvaliadorId, loggedUser]);
 
   useEffect(() => {
-    if (mainTab === 'resultados') {
+    if (mainTab === 'resultados' || loggedRole === 'candidato') {
       fetchResultados();
     }
   }, [mainTab, loggedUser, loggedRole]);
@@ -335,6 +566,14 @@ export default function App() {
   const fetchResultados = async () => {
     setIsLoadingResultados(true);
     try {
+      if (!loggedUser || !('organizacao_id' in loggedUser) || !loggedUser.organizacao_id) {
+        setResultados([]);
+        setResultadosTeoricos([]);
+        setResultadosProvas([]);
+        return;
+      }
+      const orgId = loggedUser.organizacao_id;
+
       let query = supabase
         .from('avaliacoes')
         .select(`
@@ -353,11 +592,13 @@ export default function App() {
           observacoes_pedagogicas,
           erros_kata
         `)
+        .eq('organizacao_id', orgId)
         .order('created_at', { ascending: false });
 
       let queryTeoricas = supabase
         .from('avaliacoes_teoricas')
         .select('*')
+        .eq('organizacao_id', orgId)
         .order('created_at', { ascending: false });
 
       let queryProvas = supabase
@@ -370,6 +611,7 @@ export default function App() {
           finalizada_em,
           provas_teoricas (titulo)
         `)
+        .eq('organizacao_id', orgId)
         .order('finalizada_em', { ascending: false });
 
       if (loggedRole === 'candidato' && loggedUser) {
@@ -474,6 +716,31 @@ export default function App() {
   const handleDeleteTecnicas = (idsToDelete: string[]) => {
     if (!isUserAdmin(loggedUser)) return;
     setTecnicasToDelete(idsToDelete);
+  };
+
+  const confirmDeleteModulo = async () => {
+    if (!modulosToDelete || modulosToDelete.length === 0) return;
+    
+    try {
+      const { error } = await supabase
+        .from('modulos_avaliacao')
+        .delete()
+        .in('id', modulosToDelete);
+        
+      if (error) throw error;
+      
+      showToast('Módulo excluído com sucesso!', 'success');
+      setModulos(modulos.filter(m => !modulosToDelete.includes(m.id)));
+      setModulosToDelete(null);
+    } catch (error) {
+      console.error('Erro ao excluir módulo:', error);
+      showToast('Erro ao excluir módulo.', 'error');
+    }
+  };
+
+  const handleDeleteModulo = (id: string) => {
+    if (!isUserAdmin(loggedUser)) return;
+    setModulosToDelete([id]);
   };
 
   const aggregatedResultados = useMemo(() => {
@@ -739,7 +1006,15 @@ export default function App() {
                 
                 ${av.sugestao_estudo ? `<div class="field"><span class="label">Sugestão de Estudo:</span> <div class="value">${av.sugestao_estudo}</div></div>` : ''}
                 ${motivos.length > 0 ? `<div class="field"><span class="label">Motivos de Pendência:</span> <ul class="value">${motivos.map((m: string) => `<li>${m}</li>`).join('')}</ul></div>` : ''}
-                ${observacoes.length > 0 ? `<div class="field"><span class="label">Observações Pedagógicas:</span> <ul class="value">${observacoes.map((o: string) => `<li>${o}</li>`).join('')}</ul></div>` : ''}
+                ${observacoes.length > 0 ? `<div class="field"><span class="label">Observações Pedagógicas:</span> <ul class="value" style="list-style-type: none; padding-left: 0;">${observacoes.map((o: string) => {
+                  const lines = o.split('\n');
+                  return `<li style="margin-bottom: 12px;">${lines.map(line => {
+                    if (line.startsWith('**') && line.endsWith('**')) {
+                      return `<strong style="display: block; margin-bottom: 4px;">${line.replace(/\*\*/g, '')}</strong>`;
+                    }
+                    return `<div style="margin-left: 12px; margin-bottom: 2px;">&bull; ${line}</div>`;
+                  }).join('')}</li>`;
+                }).join('')}</ul></div>` : ''}
                 ${errosKata.length > 0 ? `<div class="field"><span class="label">Erros Kata:</span> <ul class="value">${errosKata.map((e: string) => `<li>${e}</li>`).join('')}</ul></div>` : ''}
               </div>
             `}).join('')}
@@ -881,74 +1156,169 @@ export default function App() {
     }
   };
 
-  // --- Login Handler ---
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanZempo = loginZempo.trim();
-    const cleanSenha = senhaZempo.trim();
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-    if (!cleanZempo || !cleanSenha) {
+  // --- Login Handler ---
+  const handleLogin = async (email: string, senha: string) => {
+    const cleanEmail = email.trim();
+    const cleanSenha = senha.trim();
+
+    if (!cleanEmail || !cleanSenha) {
       setLoginError('Preencha ambos os campos.');
       return;
     }
 
+    setIsLoggingIn(true);
+    setLoginError('');
+
     try {
       const { supabase } = await import('./lib/supabase');
 
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: cleanEmail,
+        password: cleanSenha,
+      });
+
+      if (authError) throw authError;
+
+      // Fetch user profile
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: userProfile, error: profileError } = await supabase
+          .from('usuarios')
+          .select('*')
+          .eq('id', user.id)
+          .single();
+
+        if (profileError) throw profileError;
+
+        if (userProfile) {
+          const mappedProfile = {
+            ...userProfile,
+            auth_id: userProfile.id,
+            id: userProfile.reference_id || userProfile.id
+          };
+          setLoggedUser(mappedProfile);
+          setLoggedRole(mappedProfile.role);
+          if (mappedProfile.role === 'candidato') {
+            setMainTab('realizar_prova');
+            setCurrentView('realizar_prova');
+          } else {
+            setSelectedAvaliadorId(mappedProfile.id);
+            setMainTab('avaliacao');
+            setCurrentView('avaliacao');
+          }
+          setIsLoggingIn(false);
+          return;
+        }
+      }
+    } catch (error: any) {
+      console.error('Login error:', error);
+      setLoginError(error.message === 'Invalid login credentials' ? 'E-mail ou senha incorretos.' : 'Erro ao fazer login.');
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleCheckZempo = async (zempo: string) => {
+    try {
+      const { supabase } = await import('./lib/supabase');
+      
       // Check avaliadores
-      const { data: avaliadorData, error: avaliadorError } = await supabase
+      const { data: avaliador } = await supabase
         .from('avaliadores')
         .select('*')
-        .ilike('zempo', cleanZempo)
-        .maybeSingle();
-
-      if (avaliadorData) {
-        // Se o avaliador não tem senha cadastrada no banco, a senha inicial é o próprio Zempo
-        const isFirstAccess = !avaliadorData.senha;
-        const senhaCorreta = avaliadorData.senha || avaliadorData.zempo?.trim();
-        if (cleanSenha === senhaCorreta) {
-          setLoggedUser(avaliadorData);
-          setLoggedRole('avaliador');
-          setSelectedAvaliadorId(avaliadorData.id);
-          setLoginError('');
-          if (isFirstAccess) {
-            setRequirePasswordChange(true);
-          }
-        } else {
-          setLoginError('Senha incorreta.');
-        }
-        return;
-      }
+        .eq('zempo', zempo)
+        .single();
+        
+      if (avaliador) return { user: avaliador, role: 'avaliador' };
 
       // Check candidatos
-      const { data: candidatoData, error: candidatoError } = await supabase
+      const { data: candidato } = await supabase
         .from('candidatos')
         .select('*')
-        .ilike('zempo', cleanZempo)
-        .maybeSingle();
+        .eq('zempo', zempo)
+        .single();
 
-      if (candidatoData) {
-        // Se o candidato não tem senha cadastrada no banco, a senha inicial é o próprio Zempo
-        const isFirstAccess = !candidatoData.senha;
-        const senhaCorreta = candidatoData.senha || candidatoData.zempo?.trim();
-        if (cleanSenha === senhaCorreta) {
-          setLoggedUser(candidatoData);
-          setLoggedRole('candidato');
-          setMainTab('resultados');
-          setLoginError('');
-          if (isFirstAccess) {
-            setRequirePasswordChange(true);
-          }
-        } else {
-          setLoginError('Senha incorreta.');
+      if (candidato) return { user: candidato, role: 'candidato' };
+
+      return null;
+    } catch (err) {
+      console.error(err);
+      return null;
+    }
+  };
+
+  const handleFirstAccess = async (zempo: string, email: string, senha: string, telefone: string, userData: any, role: string) => {
+    setIsLoggingIn(true);
+    setLoginError('');
+    try {
+      const { supabase } = await import('./lib/supabase');
+      
+      // 1. Sign up
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: email.trim(),
+        password: senha,
+      });
+
+      if (authError) throw authError;
+
+      if (authData.user) {
+        // 2. Create profile in usuarios
+        const { error: userError } = await supabase.from('usuarios').insert([{
+          id: authData.user.id,
+          email: email.trim(),
+          nome: userData.nome,
+          role: role,
+          organizacao_id: userData.organizacao_id,
+          reference_id: userData.id
+        }]);
+        
+        if (userError) throw userError;
+
+        // 3. Update phone in the respective table (optional, but requested by user)
+        if (role === 'avaliador') {
+          await supabase.from('avaliadores').update({ telefone: telefone }).eq('id', userData.id);
+        } else if (role === 'candidato') {
+          await supabase.from('candidatos').update({ telefone: telefone }).eq('id', userData.id);
         }
-        return;
+        
+        if (!authData.session) {
+          setLoginError('Cadastro realizado! Verifique seu e-mail para confirmar a conta.');
+          setIsLoggingIn(false);
+          return;
+        }
+        
+        // Successfully logged in
+        const newUserProfile = {
+          id: authData.user.id,
+          email: email.trim(),
+          nome: userData.nome,
+          role: role,
+          organizacao_id: userData.organizacao_id,
+          reference_id: userData.id
+        };
+        const mappedProfile = {
+          ...newUserProfile,
+          auth_id: newUserProfile.id,
+          id: newUserProfile.reference_id || newUserProfile.id
+        };
+        setLoggedUser(mappedProfile);
+        setLoggedRole(role as any);
+        if (role === 'candidato') {
+          setMainTab('realizar_prova');
+          setCurrentView('realizar_prova');
+        } else {
+          setSelectedAvaliadorId(mappedProfile.id);
+          setMainTab('avaliacao');
+          setCurrentView('avaliacao');
+        }
       }
-
-      setLoginError('Usuário não encontrado com este Zempo.');
-    } catch (error: any) {
-      console.error('Erro no login:', error);
-      setLoginError('Erro ao realizar login. Tente novamente.');
+    } catch (err: any) {
+      console.error(err);
+      setLoginError(err.message || 'Erro ao criar conta.');
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -1004,6 +1374,31 @@ export default function App() {
     setMainTab('avaliacao');
   };
 
+  const handleSaveOrgSettings = async () => {
+    if (!loggedUser?.organizacao_id || !editingOrgSettings) return;
+    setIsSavingOrg(true);
+    try {
+      const { error } = await supabase
+        .from('organizacoes')
+        .update({
+          nome: editingOrgSettings.nome,
+          logo_url: editingOrgSettings.logo_url,
+          cor_primaria: editingOrgSettings.cor_primaria
+        })
+        .eq('id', loggedUser.organizacao_id);
+
+      if (error) throw error;
+      
+      setOrgSettings(editingOrgSettings);
+      alert('Configurações da organização salvas com sucesso!');
+    } catch (error) {
+      console.error('Erro ao salvar configurações da organização:', error);
+      alert('Erro ao salvar configurações. Tente novamente.');
+    } finally {
+      setIsSavingOrg(false);
+    }
+  };
+
   const handleSaveModulo = async () => {
     if (!newModulo.data || !newModulo.tema) {
       showToast('Data e Tema são obrigatórios.', 'error');
@@ -1021,7 +1416,8 @@ export default function App() {
           showToast('Módulo atualizado com sucesso!', 'success');
         }
       } else {
-        const { data, error } = await supabase.from('modulos_avaliacao').insert([newModulo]).select();
+        const moduloToSave = { ...newModulo, organizacao_id: loggedUser?.organizacao_id };
+        const { data, error } = await supabase.from('modulos_avaliacao').insert([moduloToSave]).select();
         if (error) throw error;
         if (data) {
           setModulos([...modulos, data[0]]);
@@ -1061,7 +1457,8 @@ export default function App() {
           nome: nome || 'Sem Nome',
           grau_pretendido: parsedGrau,
           dojo: dojo || '',
-          zempo: zempo || ''
+          zempo: zempo || '',
+          organizacao_id: loggedUser?.organizacao_id
         };
       }).filter(c => c.nome !== 'Sem Nome' || c.dojo !== '' || c.zempo !== '');
 
@@ -1095,7 +1492,8 @@ export default function App() {
           nome: nome || 'Sem Nome',
           graduacao: graduacao || '1º Dan',
           zempo: zempo || '',
-          funcao: funcao || 'avaliador'
+          funcao: funcao || 'avaliador',
+          organizacao_id: loggedUser?.organizacao_id
         };
       }).filter(a => a.nome !== 'Sem Nome' || a.graduacao !== '1º Dan');
 
@@ -1115,7 +1513,7 @@ export default function App() {
 
   const handleImportFromTreinamento = async () => {
     try {
-      const { data: participantes, error } = await supabase.from('treinamento_participantes').select('*');
+      const { data: participantes, error } = await supabase.from('treinamento_participantes').select('*').eq('organizacao_id', loggedUser?.organizacao_id);
       if (error) throw error;
       
       if (!participantes || participantes.length === 0) {
@@ -1168,7 +1566,8 @@ export default function App() {
       nome: p.nome,
       graduacao: p.graduacao,
       zempo: p.zempo || '',
-      funcao: p.is_coordenador ? 'coordenador' : 'avaliador'
+      funcao: p.is_coordenador ? 'coordenador' : 'avaliador',
+      organizacao_id: loggedUser?.organizacao_id
     }));
 
     try {
@@ -1201,7 +1600,8 @@ export default function App() {
         return {
           nome: nome || 'Sem Nome',
           ordem: parseInt(ordemStr) || 0,
-          grupo: grupo || 'Geral'
+          grupo: grupo || 'Geral',
+          organizacao_id: loggedUser?.organizacao_id
         };
       }).filter(k => k.nome !== 'Sem Nome' || k.grupo !== 'Geral');
 
@@ -1220,7 +1620,7 @@ export default function App() {
   };
 
   const addManualCandidato = async () => {
-    const { data, error } = await supabase.from('candidatos').insert([{ nome: '', grau_pretendido: 'Shodan (1º Dan)', dojo: '', zempo: '' }]).select();
+    const { data, error } = await supabase.from('candidatos').insert([{ nome: '', grau_pretendido: 'Shodan (1º Dan)', dojo: '', zempo: '', organizacao_id: loggedUser?.organizacao_id }]).select();
     if (data && !error) setCandidatos([...candidatos, data[0]].sort((a, b) => a.nome.localeCompare(b.nome)));
   };
 
@@ -1238,7 +1638,8 @@ export default function App() {
         return {
           nome: nome || 'Sem Nome',
           grupo: grupo || 'Geral',
-          tipo: tipo || ''
+          tipo: tipo || '',
+          organizacao_id: loggedUser?.organizacao_id
         };
       }).filter(t => t.nome !== 'Sem Nome' || t.grupo !== 'Geral');
 
@@ -1257,17 +1658,17 @@ export default function App() {
   };
 
   const addManualAvaliador = async () => {
-    const { data, error } = await supabase.from('avaliadores').insert([{ nome: '', graduacao: '1º Dan', zempo: '', funcao: 'avaliador' }]).select();
+    const { data, error } = await supabase.from('avaliadores').insert([{ nome: '', graduacao: '1º Dan', zempo: '', funcao: 'avaliador', organizacao_id: loggedUser?.organizacao_id }]).select();
     if (data && !error) setAvaliadores([...avaliadores, data[0]].sort((a, b) => a.nome.localeCompare(b.nome)));
   };
 
   const addManualTecnica = async () => {
-    const { data, error } = await supabase.from('tecnicas').insert([{ nome: '', grupo: 'Te-waza', tipo: '' }]).select();
+    const { data, error } = await supabase.from('tecnicas').insert([{ nome: '', grupo: 'Te-waza', tipo: '', organizacao_id: loggedUser?.organizacao_id }]).select();
     if (data && !error) setTecnicas([...tecnicas, data[0]].sort((a, b) => a.nome.localeCompare(b.nome)));
   };
 
   const addManualKata = async () => {
-    const { data, error } = await supabase.from('katas').insert([{ nome: '', ordem: 1, grupo: 'Nage-no-Kata' }]).select();
+    const { data, error } = await supabase.from('katas').insert([{ nome: '', ordem: 1, grupo: 'Nage-no-Kata', organizacao_id: loggedUser?.organizacao_id }]).select();
     if (data && !error) setKatas([...katas, data[0]].sort((a, b) => a.grupo.localeCompare(b.grupo) || a.ordem - b.ordem));
   };
 
@@ -1652,6 +2053,9 @@ export default function App() {
     if (selectedTema !== 'Katas') {
       wazaList.forEach(w => {
         if (w.kuzushi !== 'AVALIAR' && w.tsukuri !== 'AVALIAR' && w.kake !== 'AVALIAR') {
+          const techName = w.name || 'Técnica não nomeada';
+          const techObs: string[] = [];
+          
           if (isHighDan) {
             // Alta Graduação (3 fases: Inovação, Eficiência, Aplicabilidade)
             totalPossiblePoints += 300; // 100 por fase
@@ -1667,11 +2071,25 @@ export default function App() {
             totalPoints += getHighDanPoints(w.tsukuri); // Eficiência
             totalPoints += getHighDanPoints(w.kake);    // Aplicabilidade
 
-            if (w.kuzushi === 'Regular' || w.kake === 'Regular') {
-              pedagogicalObs.push(`Em ${w.name || 'Técnica não nomeada'}: Melhorar inovação e criatividade.`);
-            }
-            if (w.tsukuri === 'Regular') {
-              pedagogicalObs.push(`Em ${w.name || 'Técnica não nomeada'}: Eficiência precisa ser aprimorada.`);
+            if (finalTargetDan === 'Yondan (4º Dan)') {
+              if (w.kuzushi === 'Regular') techObs.push(`Inovação: Apresentou métodos excessivamente tradicionais e repetitivos. Faltou buscar novas formas de abordar o ensino da técnica.`);
+              else if (w.kuzushi === 'Bom') techObs.push(`Inovação: Utilizou variações interessantes que fogem do comum, demonstrando pesquisa metodológica.`);
+              else if (w.kuzushi === 'Ótimo') techObs.push(`Inovação: Introduziu recursos externos (elásticos, vídeos ou exercícios sensoriais) que aceleram a compreensão da técnica de forma inédita.`);
+              
+              if (w.tsukuri === 'Regular') techObs.push(`Eficiência: O educativo é confuso ou mecanicamente pobre. O esforço despendido pelo aluno não se traduz em melhora real no golpe.`);
+              else if (w.tsukuri === 'Bom') techObs.push(`Eficiência: O exercício cumpre o papel de melhorar a execução técnica e é fácil de ser replicado em uma aula regular.`);
+              else if (w.tsukuri === 'Ótimo') techObs.push(`Eficiência: Máxima economia de energia e alta eficácia. O educativo isola o 'ponto crítico' da técnica, gerando uma evolução perceptível no aprendizado.`);
+
+              if (w.kake === 'Regular') techObs.push(`Aplicabilidade: Limitou-se a repetir o básico, sem adaptar o exercício para diferentes contextos de aplicação.`);
+              else if (w.kake === 'Bom') techObs.push(`Aplicabilidade: Demonstrou boas adaptações mostrando versatilidade no ensino.`);
+              else if (w.kake === 'Ótimo') techObs.push(`Aplicabilidade: Criou cenários lúdicos ou situacionais complexos que isolam perfeitamente o erro do aluno e propõem a correção imediata.`);
+            } else if (finalTargetDan === 'Godan (5º Dan)') {
+              if (w.kake === 'Ótimo') techObs.push(`Sincronia perfeita. Utilizou a energia do golpe do agressor para fluir diretamente para a projeção ou imobilização, sem interrupção do movimento.`);
+              else if (w.kake === 'Bom') techObs.push(`Bloqueio eficiente e entrada oportuna. Conseguiu anular a agressão, embora tenha dependido de força física para estabilizar o agressor antes da técnica.`);
+              else if (w.kake === 'Regular') techObs.push(`Reação lenta ou defesa 'dura'. Expôs-se ao raio de ação do segundo golpe do agressor por falta de esquiva (Tai-sabaki) adequada.`);
+            } else {
+              if (w.kuzushi === 'Regular' || w.kake === 'Regular') techObs.push(`Melhorar inovação e criatividade.`);
+              if (w.tsukuri === 'Regular') techObs.push(`Eficiência precisa ser aprimorada.`);
             }
           } else {
             // 1º a 3º Dan (3 fases: Kuzushi, Tsukuri, Kake)
@@ -1688,12 +2106,35 @@ export default function App() {
             totalPoints += getNormalPoints(w.tsukuri);
             totalPoints += getNormalPoints(w.kake);
 
-            if (w.kuzushi === 'Parcialmente Realizada' || w.tsukuri === 'Parcialmente Realizada') {
-              pedagogicalObs.push(`Em ${w.name || 'Técnica não nomeada'}: Atenção aos detalhes de preparação (Kuzushi/Tsukuri).`);
+            if (finalTargetDan === 'Sandan (3º Dan)') {
+              if (w.kuzushi === 'Parcialmente Realizada') techObs.push(`Kuzushi: Identificou a direção do movimento, mas o desequilíbrio foi aplicado com atraso ou pressa, resultando em uma quebra de postura incompleta.`);
+              else if (w.kuzushi === 'Não Realizada') techObs.push(`Kuzushi: Tentou forçar o desequilíbrio contra a movimentação natural do cenário (ex: tentar puxar enquanto o Uke pressiona), demonstrando falta de leitura de luta.`);
+              else if (w.kuzushi === 'Realizada') techObs.push(`Kuzushi: Excelente aproveitamento da força e direção do deslocamento do Uke. O desequilíbrio foi sincronizado com o passo, exigindo o mínimo de esforço muscular.`);
+              
+              if (w.tsukuri === 'Parcialmente Realizada') techObs.push(`Tsukuri: O encaixe ocorreu, mas a postura foi comprometida pelo deslocamento lateral ou pela pegada do adversário, gerando uma entrada 'curta' ou instável.`);
+              else if (w.tsukuri === 'Não Realizada') techObs.push(`Tsukuri: Incapaz de ajustar o posicionamento dos pés e quadril ao cenário proposto. O candidato 'atropelou' o movimento ou ficou bloqueado pela pegada do Uke.`);
+              else if (w.tsukuri === 'Realizada') techObs.push(`Tsukuri: Ajuste de corpo impecável mesmo sob pressão. O Tai-sabaki foi adaptado corretamente para a pegada (oposta ou igual), garantindo o ponto de apoio ideal.`);
+              
+              if (w.kake === 'Parcialmente Realizada') techObs.push(`Kake: Concluiu a técnica, mas a finalização foi 'suja' ou sem controle de solo, possivelmente devido à má coordenação entre o deslocamento e o golpe.`);
+              else if (w.kake === 'Não Realizada') techObs.push(`Kake: A técnica falhou na conclusão. O deslocamento ou a oposição do Uke anulou a alavanca, resultando em perda de equilíbrio do Tori ou abandono da técnica.`);
+              else if (w.kake === 'Realizada') techObs.push(`Kake: Projeção limpa e potente. Demonstrou domínio total do cenário, mantendo o controle do Uke e o próprio equilíbrio (Zanshin) após o impacto.`);
+            } else {
+              if (w.kuzushi === 'Parcialmente Realizada') techObs.push(`Kuzushi: Houve a intenção do desequilíbrio, mas a tração foi interrompida ou insuficiente, exigindo força excessiva no tronco para completar o golpe.`);
+              else if (w.kuzushi === 'Não Realizada') techObs.push(`Kuzushi: Tentativa de projeção com o Uke em equilíbrio total. Ausência de ação de mãos (Hikite/Tsurite) para romper o centro de gravidade.`);
+              else if (w.kuzushi === 'Realizada') techObs.push(`Kuzushi: Domínio pleno da direção da força. O desequilíbrio foi contínuo e eficiente, anulando a resistência do Uke antes da entrada.`);
+              
+              if (w.tsukuri === 'Parcialmente Realizada') techObs.push(`Tsukuri: Posicionamento razoável, mas com falha na base (pés muito abertos/fechados) ou distância excessiva, dificultando a continuidade do golpe.`);
+              else if (w.tsukuri === 'Não Realizada') techObs.push(`Tsukuri: Encaixe mecanicamente incorreto. O Tori se posicionou fora do eixo de projeção ou sem o contato necessário para aplicar a alavanca.`);
+              else if (w.tsukuri === 'Realizada') techObs.push(`Tsukuri: Entrada precisa e fluida. O contato entre os corpos foi total (Tai-sabaki) e o posicionamento dos pés e quadril permitiu a alavanca ideal.`);
+              
+              if (w.kake === 'Parcialmente Realizada') techObs.push(`Kake: A projeção ocorreu, mas faltou 'Kime' (finalização decidida). O Uke caiu sem controle ou o Tori perdeu o equilíbrio após o golpe.`);
+              else if (w.kake === 'Não Realizada') techObs.push(`Kake: A técnica não resultou em projeção efetiva. Falta de potência, coordenação ou abandono do golpe antes da conclusão.`);
+              else if (w.kake === 'Realizada') techObs.push(`Kake: Finalização explosiva e controlada. Houve a continuidade do movimento até o final, demonstrando domínio do próprio corpo e do parceiro.`);
             }
-            if (w.kuzushi === 'Não Realizada' || w.tsukuri === 'Não Realizada') {
-              pedagogicalObs.push(`Em ${w.name || 'Técnica não nomeada'}: Falha crítica na preparação (Kuzushi/Tsukuri).`);
-            }
+          }
+          
+          if (techObs.length > 0) {
+            pedagogicalObs.push(`**Em ${techName}**\n${techObs.join('\n')}`);
           }
         }
       });
@@ -1705,13 +2146,26 @@ export default function App() {
           totalPossiblePoints += 100; // 100 por Kihon
           
           if (k.status === 'Realizada') totalPoints += 100;
-          if (k.status === 'Parcialmente Realizada') {
-            totalPoints += 50;
-            pedagogicalObs.push(`Em ${k.name}: Atenção aos detalhes.`);
-          }
-          if (k.status === 'Não Realizada') {
-            totalPoints += 0;
-            pedagogicalObs.push(`Em ${k.name}: Falha crítica.`);
+          if (k.status === 'Parcialmente Realizada') totalPoints += 50;
+          if (k.status === 'Não Realizada') totalPoints += 0;
+          
+          const kihonName = k.name.toLowerCase();
+          
+          if (kihonName.includes('rei')) {
+            if (k.status === 'Parcialmente Realizada') pedagogicalObs.push(`**Em ${k.name}**\nApresentou as saudações, mas com falta de formalidade ou postura correta (ex: costas curvadas ou olhar disperso). O cerimonial deve ser mais solene.`);
+            else if (k.status === 'Não Realizada') pedagogicalObs.push(`**Em ${k.name}**\nDesatenção total à etiqueta. Esqueceu saudações obrigatórias ou as realizou de forma displicente, demonstrando falta de preparo filosófico.`);
+            else if (k.status === 'Realizada') pedagogicalObs.push(`**Em ${k.name}**\nDemonstrou postura impecável e respeito absoluto ao cerimonial. Execução correta do Ritsurei e Zarei, refletindo a disciplina e o espírito do Judô.`);
+          } else if (kihonName.includes('shintai') || kihonName.includes('tai-sabaki')) {
+            if (k.status === 'Parcialmente Realizada') pedagogicalObs.push(`**Em ${k.name}**\nDesloca-se com certa segurança, mas apresenta momentos de instabilidade ou 'salta' durante o movimento, perdendo o contato ideal com o solo.`);
+            else if (k.status === 'Não Realizada') pedagogicalObs.push(`**Em ${k.name}**\nMovimentação pesada e descoordenada. Cruza as pernas excessivamente ou caminha sem a técnica de deslize, tornando-se um alvo fácil para ataques.`);
+            else if (k.status === 'Realizada') pedagogicalObs.push(`**Em ${k.name}**\nMovimentação fluida, mantendo o centro de gravidade estável. Deslocamento em Suri-ashi (pés deslizando) constante, sem cruzar as pernas ou perder o equilíbrio.`);
+          } else if (kihonName.includes('kumi') || kihonName.includes('pegada')) {
+            if (k.status === 'Parcialmente Realizada') pedagogicalObs.push(`**Em ${k.name}**\nEstabelece a pegada, mas apresenta rigidez ou não a utiliza eficientemente para controlar a distância e o desequilíbrio.`);
+            else if (k.status === 'Não Realizada') pedagogicalObs.push(`**Em ${k.name}**\nPegada passiva ou tecnicamente incorreta (ex: mãos em locais proibidos ou ineficientes). Não demonstra domínio sobre a movimentação do parceiro através da pegada.`);
+            else if (k.status === 'Realizada') pedagogicalObs.push(`**Em ${k.name}**\nPegada firme e estratégica. Utiliza o Hikite e Tsurite de forma correta para controlar a distância e preparar o ataque com economia de energia.`);
+          } else {
+            if (k.status === 'Parcialmente Realizada') pedagogicalObs.push(`**Em ${k.name}**\nAtenção aos detalhes.`);
+            else if (k.status === 'Não Realizada') pedagogicalObs.push(`**Em ${k.name}**\nFalha crítica.`);
           }
         }
       });
@@ -1778,21 +2232,50 @@ export default function App() {
 
     let studySuggestion = '';
     switch (finalTargetDan) {
-      case 'Shodan (1º Dan)': studySuggestion = 'Focar na consolidação das técnicas fundamentais do Go-Kyu. '; break;
-      case 'Nidan (2º Dan)': studySuggestion = 'Aprofundar o repertório com as técnicas do Extra Go-Kyu, mantendo a fluidez. '; break;
-      case 'Sandan (3º Dan)': studySuggestion = 'Trabalhar a aplicabilidade das técnicas em cenários reais de combate esportivo (Shiai). '; break;
-      case 'Yondan (4º Dan)': studySuggestion = 'Aprimorar os métodos educativos (Uchi-komi e Kakari-geiko). Demonstrar maior criatividade. '; break;
-      case 'Godan (5º Dan)': studySuggestion = 'Focar na aplicabilidade das técnicas para Defesa Pessoal (Self-Defense), controle absoluto. '; break;
+      case 'Shodan (1º Dan)': studySuggestion = 'O desempenho de excelência nasce da repetição consciente. Sugerimos o estudo profundo do Gokyo no Waza e dos fundamentos de Tai-sabaki. Seu foco deve estar na sincronia perfeita entre mãos e pés. Lembre-se: não se busca a força, mas a precisão técnica. Assista a vídeos de grandes mestres executando os fundamentos e pratique a transição fluida entre as fases do golpe (Kuzushi-Tsukuri-Kake) até que se tornem um único movimento reflexo. '; break;
+      case 'Nidan (2º Dan)': studySuggestion = 'Seu desafio nesta graduação é demonstrar que sua base técnica rompeu as fronteiras do Gokyo no Waza. O desempenho de excelência agora exige o domínio das técnicas Extra-Gokyo, aplicadas com a mesma precisão e fluidez das técnicas básicas. O avaliador buscará observar se você compreende as mecânicas mais complexas e menos comuns do Judô Kodokan. Não se limite ao tradicional: explore a riqueza técnica extra e demonstre que seu arsenal é vasto, eficiente e está pronto para ser testado em variações de combate real. '; break;
+      case 'Sandan (3º Dan)': studySuggestion = 'O candidato a Sandan deve transcender a técnica estática. Indicamos o estudo de Renraku-henka-waza (combinações e variações) e o domínio das estratégias de Kumi-kata contra diferentes biotipos e guardas (destro vs. canhoto). Estude o tempo de reação (De-ashi) e como utilizar o deslocamento do adversário a seu favor. O desempenho esperado aqui é a capacidade de aplicar o Judô em qualquer cenário de luta, transformando a movimentação do oponente em sua maior oportunidade. '; break;
+      case 'Yondan (4º Dan)': studySuggestion = 'O estudo deve ser voltado à didática e à metodologia de ensino. Sugerimos a pesquisa de educativos (Uchi-komi especiais e exercícios auxiliares) que isolem as dificuldades mecânicas dos alunos. Estude a biomecânica por trás das alavancas e a filosofia do Judô como ferramenta educativa. Seu desafio é demonstrar que você não apenas executa a técnica, mas possui métodos inovadores e eficientes para transmiti-la à próxima geração de judocas. '; break;
+      case 'Godan (5º Dan)': studySuggestion = 'O candidato a Godan deve retornar às raízes do Judô como sistema de defesa real. Indicamos o estudo rigoroso do Kodokan Goshin Jutsu e dos princípios de Atemi-waza. O foco deve estar no controle emocional, na gestão da distância (Ma-ai) e na neutralização de agressões não esportivas (armas, socos e agarrões). Seu desempenho será avaliado pela sobriedade e eficácia: a capacidade de encerrar um conflito com o máximo de eficiência e o mínimo de esforço desnecessário. '; break;
     }
 
-    if (wazaPercentage !== null && wazaPercentage < 100) {
-      if (isHighDan) {
-        studySuggestion += 'Revisar os princípios de inovação, eficiência e criatividade nas técnicas. ';
+    if (wazaPercentage !== null) {
+      if (wazaPercentage >= 70) {
+        if (finalTargetDan === 'Shodan (1º Dan)' || finalTargetDan === 'Nidan (2º Dan)') {
+          studySuggestion += 'Parabéns. Sua execução técnica demonstrou o domínio necessário das fases do golpe (Kuzushi, Tsukuri e Kake). Você provou estar pronto para o próximo passo na hierarquia do Judô. ';
+        } else if (finalTargetDan === 'Sandan (3º Dan)') {
+          studySuggestion += 'Demonstrou excelente leitura de luta e adaptabilidade nos cenários propostos (destro/canhoto e deslocamentos). Sua técnica flui de acordo com a movimentação do Uke. ';
+        } else if (finalTargetDan === 'Yondan (4º Dan)') {
+          studySuggestion += 'Sua apresentação foi digna de um mestre educador. Demonstrou criatividade nos educativos e uma capacidade clara de transmitir a biomecânica complexa de forma simples. ';
+        } else if (finalTargetDan === 'Godan (5º Dan)') {
+          studySuggestion += 'Desempenho exemplar. Demonstrou a essência do Seiryoku Zenyo (máxima eficiência) em cenários de defesa pessoal, com controle absoluto do agressor e do ambiente. ';
+        }
+      } else if (wazaPercentage >= 50) {
+        if (finalTargetDan === 'Shodan (1º Dan)' || finalTargetDan === 'Nidan (2º Dan)') {
+          studySuggestion += 'Seu desempenho mostra que você conhece o caminho, mas falta precisão. Houve falhas na finalização, preparação, desequilíbrio ou no repertório. Intensifique o Uchi-komi e a repetição dos fundamentos. ';
+        } else if (finalTargetDan === 'Sandan (3º Dan)') {
+          studySuggestion += 'Você domina a técnica isolada, mas teve dificuldade em aplicá-la em movimentos e cenários propostos. O estudo de Renraku-waza (combinações) deve ser sua prioridade agora. ';
+        } else if (finalTargetDan === 'Yondan (4º Dan)') {
+          studySuggestion += 'Embora sua técnica pessoal seja boa, os educativos apresentados carecem de clareza pedagógica ou eficiência prática. Refine sua metodologia de ensino e a lógica dos exercícios propostos. ';
+        } else if (finalTargetDan === 'Godan (5º Dan)') {
+          studySuggestion += 'A aplicação técnica foi correta, mas houve exposição desnecessária ou excesso de força bruta. Refine o tempo de reação (Ma-ai) e a precisão nos desvencilhamentos contra agressões. ';
+        }
       } else {
-        studySuggestion += 'Revisar os princípios de Kuzushi e Tsukuri para garantir um Kake limpo. ';
+        if (finalTargetDan === 'Shodan (1º Dan)' || finalTargetDan === 'Nidan (2º Dan)') {
+          studySuggestion += 'O resultado indica que os fundamentos básicos (Kihon) ainda não estão consolidados. Sugerimos um retorno à base e um período maior de prática antes de uma nova submissão ao exame. ';
+        } else if (finalTargetDan === 'Sandan (3º Dan)') {
+          studySuggestion += 'A execução foi excessivamente estática. Para este nível, espera-se que o Judô seja dinâmico. É necessário aprofundar o estudo da oportunidade (De-ashi) e do uso da força do adversário. ';
+        } else if (finalTargetDan === 'Yondan (4º Dan)') {
+          studySuggestion += 'A apresentação não atingiu o nível de maturidade esperado para um formador. Faltou fundamentação teórica e inovação na proposta pedagógica. Recomendamos mentoria com professores mais graduados. ';
+        } else if (finalTargetDan === 'Godan (5º Dan)') {
+          studySuggestion += 'O desempenho em cenários reais foi considerado inseguro. A falta de controle sobre o agressor ou a falha na leitura da distância tornariam a técnica ineficaz em uma situação real. ';
+        }
       }
     }
-    if (kataPercentage !== null && kataPercentage < 80 && kataList.length > 0) studySuggestion += 'Revisar os protocolos da IJF para os Katas, minimizando erros posturais.';
+
+    if (kataPercentage !== null && kataPercentage < 70) {
+      studySuggestion += 'Revisar os protocolos da IJF para os Katas, minimizando erros posturais, de execução e cerimonial.';
+    }
 
     return {
       wazaPercentage, totalPoints, totalPossiblePoints, pedagogicalObs, totalKataScore, maxKataScore,
@@ -1949,6 +2432,10 @@ export default function App() {
 
   const broadcastDraw = () => {
     if (!channelRef.current) return;
+    if (!selectedCandidatoId) {
+      showToast('Selecione um candidato antes de transmitir o sorteio.', 'error');
+      return;
+    }
 
     if (selectedTema === 'Katas' && kataList.length === 0) {
       showToast('Selecione um Kata antes de transmitir.', 'error');
@@ -2013,8 +2500,7 @@ export default function App() {
       const { supabase } = await import('./lib/supabase');
       if (!import.meta.env.VITE_SUPABASE_URL) throw new Error('Credenciais do Supabase não configuradas.');
 
-      // 1. Salvar a avaliação principal
-      const { data: avaliacaoData, error: avaliacaoError } = await supabase.from('avaliacoes').insert([{
+      const avaliacaoDataToSave = {
         candidato_id: (selectedCandidatoId && selectedCandidatoId !== 'manual') ? selectedCandidatoId : null,
         candidato_nome: finalCandidateName,
         avaliador_id: selectedAvaliadorId || null,
@@ -2027,59 +2513,94 @@ export default function App() {
         motivos_pendencia: reportData.pendingReasons,
         observacoes_pedagogicas: reportData.pedagogicalObs,
         erros_kata: reportData.kataErrorsList,
-        modulo_id: selectedModuloId || null
-      }]).select().single();
+        modulo_id: selectedModuloId || null,
+        organizacao_id: loggedUser?.organizacao_id
+      };
 
-      if (avaliacaoError) throw avaliacaoError;
-      const avaliacaoId = avaliacaoData.id;
-
-      // 2. Salvar os dados de Waza (Técnicas)
+      let wazaInsertsToSave: any[] = [];
       if (selectedTema !== 'Katas' && wazaList.length > 0) {
-        const wazaInserts = wazaList.map(w => ({
-          avaliacao_id: avaliacaoId,
+        wazaInsertsToSave = wazaList.map(w => ({
           tecnica_nome: w.name,
           kuzushi: w.kuzushi,
           tsukuri: w.tsukuri,
-          kake: w.kake
+          kake: w.kake,
+          organizacao_id: loggedUser?.organizacao_id
         }));
-        const { error: wazaError } = await supabase.from('avaliacao_waza').insert(wazaInserts);
-        if (wazaError) throw wazaError;
       }
 
-      // 2.5 Salvar os dados de Kihon
+      let kihonInsertsToSave: any[] = [];
       if (selectedTema !== 'Katas' && !isHighDan && kihonList.length > 0) {
-        const kihonInserts = kihonList.map(k => ({
-          avaliacao_id: avaliacaoId,
+        kihonInsertsToSave = kihonList.map(k => ({
           kihon_nome: k.name,
-          status: k.status
+          status: k.status,
+          organizacao_id: loggedUser?.organizacao_id
         }));
-        const { error: kihonError } = await supabase.from('avaliacao_kihon').insert(kihonInserts);
-        if (kihonError) throw kihonError;
       }
 
-      // 3. Salvar os dados de Kata
+      let kataInsertsToSave: any[] = [];
       if (selectedTema === 'Katas' && kataList.length > 0) {
-        const kataInserts = kataList.map(k => ({
-          avaliacao_id: avaliacaoId,
+        kataInsertsToSave = kataList.map(k => ({
           kata_nome: k.name,
           omitted: k.omitted,
           small_errors: k.smallErrors,
           medium_errors: k.mediumErrors,
-          grave_errors: k.graveErrors
+          grave_errors: k.graveErrors,
+          organizacao_id: loggedUser?.organizacao_id
         }));
-        const { error: kataError } = await supabase.from('avaliacao_kata').insert(kataInserts);
-        if (kataError) throw kataError;
       }
 
-      // 4. Salvar os dados de Alta Graduação (se aplicável)
+      let highDanInsertToSave: any = null;
       if (isHighDan && highDanEval) {
-        const { error: highDanError } = await supabase.from('avaliacao_alta_graduacao').insert([{
-          avaliacao_id: avaliacaoId,
+        highDanInsertToSave = {
           criatividade: highDanEval.creativity,
           inovacao: highDanEval.innovation,
-          eficiencia: highDanEval.efficiency
-        }]);
-        if (highDanError) throw highDanError;
+          eficiencia: highDanEval.efficiency,
+          organizacao_id: loggedUser?.organizacao_id
+        };
+      }
+
+      if (!navigator.onLine) {
+        // Offline mode: save to queue
+        addToSyncQueue({
+          type: 'avaliacao',
+          payload: {
+            avaliacaoData: avaliacaoDataToSave,
+            wazaInserts: wazaInsertsToSave,
+            kihonInserts: kihonInsertsToSave,
+            kataInserts: kataInsertsToSave,
+            highDanInsert: highDanInsertToSave
+          }
+        });
+        showToast('Salvo offline. Sincronizará quando houver conexão.', 'success');
+      } else {
+        // Online mode: save directly
+        const { data: avaliacaoData, error: avaliacaoError } = await supabase.from('avaliacoes').insert([avaliacaoDataToSave]).select().single();
+        if (avaliacaoError) throw avaliacaoError;
+        const avaliacaoId = avaliacaoData.id;
+
+        if (wazaInsertsToSave.length > 0) {
+          const wazaWithId = wazaInsertsToSave.map(w => ({ ...w, avaliacao_id: avaliacaoId }));
+          const { error: wazaError } = await supabase.from('avaliacao_waza').insert(wazaWithId);
+          if (wazaError) throw wazaError;
+        }
+
+        if (kihonInsertsToSave.length > 0) {
+          const kihonWithId = kihonInsertsToSave.map(k => ({ ...k, avaliacao_id: avaliacaoId }));
+          const { error: kihonError } = await supabase.from('avaliacao_kihon').insert(kihonWithId);
+          if (kihonError) throw kihonError;
+        }
+
+        if (kataInsertsToSave.length > 0) {
+          const kataWithId = kataInsertsToSave.map(k => ({ ...k, avaliacao_id: avaliacaoId }));
+          const { error: kataError } = await supabase.from('avaliacao_kata').insert(kataWithId);
+          if (kataError) throw kataError;
+        }
+
+        if (highDanInsertToSave) {
+          const highDanWithId = { ...highDanInsertToSave, avaliacao_id: avaliacaoId };
+          const { error: highDanError } = await supabase.from('avaliacao_alta_graduacao').insert([highDanWithId]);
+          if (highDanError) throw highDanError;
+        }
       }
 
       setSaveSuccess(true);
@@ -2120,64 +2641,65 @@ export default function App() {
     return <PlacarResultados moduloId={placarModuloId} />;
   }
 
+  const handleOnboarding = async (nomeOrganizacao: string, nomeAdmin: string, emailAdmin: string, senhaAdmin: string) => {
+    setIsLoggingIn(true);
+    setLoginError('');
+    try {
+      const { supabase } = await import('./lib/supabase');
+      
+      // 1. Sign up the user
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: emailAdmin.trim(),
+        password: senhaAdmin,
+      });
+
+      if (authError) throw authError;
+
+      if (authData.user) {
+        // 2. Call RPC to create organization and link user
+        const { data: rpcData, error: rpcError } = await supabase.rpc('create_organization_and_admin', {
+          p_nome_organizacao: nomeOrganizacao.trim(),
+          p_nome_admin: nomeAdmin.trim()
+        });
+
+        if (rpcError) {
+          console.error('RPC Error:', rpcError);
+          throw new Error('Erro ao criar organização. Por favor, tente novamente.');
+        }
+
+        // 3. Set local state
+        setLoggedUser({
+          id: authData.user.id,
+          nome: nomeAdmin.trim(),
+          email: emailAdmin.trim(),
+          role: 'admin',
+          organizacao_id: rpcData.organizacao_id
+        });
+        
+        // Refresh full state
+        await fetchData();
+      }
+    } catch (err: any) {
+      console.error('Onboarding error:', err);
+      setLoginError(err.message || 'Erro ao criar conta.');
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
   if (treinamentoAccessId) {
     return <TreinamentoParticipantFlow treinamentoId={treinamentoAccessId} />;
   }
 
   if (!loggedUser) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans">
-        <div className="bg-white p-8 rounded-xl shadow-lg max-w-md w-full border border-slate-200">
-          <div className="flex flex-col items-center mb-8">
-            <div className="flex justify-center items-center w-full mb-0 pointer-events-none">
-              <img src="/judo_tech_icon.png" alt="Sensei Assistente Digital Logo" className="w-[200px] h-[200px] object-contain ml-[20px]" />
-            </div>
-            <h1 className="text-3xl font-black text-slate-900 text-center tracking-tight leading-tight relative z-10">
-              Sensei Assistente<br/>
-              <span className="text-red-700 font-normal">Digital</span>
-            </h1>
-            <p className="text-slate-500 text-center mt-2">A evolução natural do seu dojo</p>
-          </div>
-
-          <form onSubmit={handleLogin} className="space-y-6">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Login (Zempo)</label>
-              <input
-                type="text"
-                value={loginZempo}
-                onChange={(e) => setLoginZempo(e.target.value)}
-                className="w-full p-3 border border-slate-300 rounded-md focus:ring-2 focus:ring-red-500 outline-none"
-                placeholder="Digite seu Zempo"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Senha</label>
-              <input
-                type="password"
-                value={senhaZempo}
-                onChange={(e) => setSenhaZempo(e.target.value)}
-                className="w-full p-3 border border-slate-300 rounded-md focus:ring-2 focus:ring-red-500 outline-none"
-                placeholder="Primeiro acesso: repita o Zempo"
-              />
-            </div>
-
-            {loginError && (
-              <div className="bg-red-50 text-red-600 p-3 rounded-md text-sm flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-                {loginError}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              className="w-full bg-red-700 hover:bg-red-800 text-white p-3 rounded-md font-medium flex items-center justify-center gap-2 transition-colors"
-            >
-              <LogIn className="w-5 h-5" /> Entrar
-            </button>
-          </form>
-        </div>
-      </div>
-    );
+    return <LoginScreen 
+      onLogin={handleLogin} 
+      onCheckZempo={handleCheckZempo}
+      onFirstAccess={handleFirstAccess}
+      onOnboarding={handleOnboarding}
+      loginError={loginError} 
+      isLoading={isLoggingIn} 
+    />;
   }
 
   if (loggedUser && requirePasswordChange) {
@@ -2243,28 +2765,272 @@ export default function App() {
     );
   }
 
+  const renderResultados = () => (
+    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 animate-in fade-in">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 border-b pb-4 gap-4">
+        <h2 className="text-xl font-bold flex items-center gap-2">
+          <FileText className="w-6 h-6 text-red-600" /> Resultados das Avaliações
+        </h2>
+        <div className="flex items-center gap-2">
+          {isUserAdmin(loggedUser) && selectedResultados.size > 0 && (
+            <button 
+              onClick={() => handleDeleteResultados(Array.from(selectedResultados))}
+              className="text-sm bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1.5 rounded-md flex items-center gap-1 transition-colors"
+            >
+              <Trash2 className="w-4 h-4" /> Excluir Selecionados ({selectedResultados.size})
+            </button>
+          )}
+          <button 
+            onClick={fetchResultados}
+            disabled={isLoadingResultados}
+            className="text-sm bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-md flex items-center gap-1 transition-colors disabled:opacity-50"
+          >
+            {isLoadingResultados ? 'Atualizando...' : 'Atualizar'}
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <div>
+          <label className="block text-xs font-semibold text-slate-600 mb-1">Módulo</label>
+          <select value={filtroModulo} onChange={(e) => setFiltroModulo(e.target.value)} className="w-full p-2 text-sm border border-slate-300 rounded-md bg-white outline-none focus:ring-2 focus:ring-red-500">
+            <option value="">Todos</option>
+            {Array.from(new Set(aggregatedResultados.map(res => {
+              const modulo = modulos.find(m => m.id === res.modulo_id);
+              return res.isTeorica || res.isProvaTeorica ? res.modulo_nome : (modulo ? modulo.tema : 'Desconhecido');
+            }))).map(tema => (
+              <option key={tema} value={tema}>{tema}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-slate-600 mb-1">Grau Pretendido</label>
+          <select value={filtroGrau} onChange={(e) => setFiltroGrau(e.target.value)} className="w-full p-2 text-sm border border-slate-300 rounded-md bg-white outline-none focus:ring-2 focus:ring-red-500">
+            <option value="">Todos</option>
+            {Array.from(new Set(aggregatedResultados.map(res => res.grau_pretendido))).map(grau => (
+              <option key={grau} value={grau}>{grau}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-slate-600 mb-1">Candidato</label>
+          <input 
+            type="text" 
+            value={filtroCandidato} 
+            onChange={(e) => setFiltroCandidato(e.target.value)} 
+            placeholder="Buscar por nome..."
+            className="w-full p-2 text-sm border border-slate-300 rounded-md bg-white outline-none focus:ring-2 focus:ring-red-500"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-slate-600 mb-1">Resultado Final</label>
+          <select value={filtroResultado} onChange={(e) => setFiltroResultado(e.target.value)} className="w-full p-2 text-sm border border-slate-300 rounded-md bg-white outline-none focus:ring-2 focus:ring-red-500">
+            <option value="">Todos</option>
+            <option value="Aprovado">Aprovado</option>
+            <option value="Pendente">Pendente</option>
+            <option value="Reprovado">Reprovado</option>
+          </select>
+        </div>
+      </div>
+
+      {isLoadingResultados ? (
+        <div className="text-center py-8 text-slate-500">Carregando resultados...</div>
+      ) : filteredResultados.length === 0 ? (
+        <div className="text-center py-8 text-slate-500">Nenhum resultado encontrado.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-50 text-slate-600 text-sm uppercase tracking-wider border-b border-slate-200">
+                {isUserAdmin(loggedUser) && (
+                  <th className="p-3 w-12 text-center">
+                    <input 
+                      type="checkbox" 
+                      className="rounded text-red-600 focus:ring-red-500 cursor-pointer"
+                      checked={selectedResultados.size === filteredResultados.length && filteredResultados.length > 0}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedResultados(new Set(filteredResultados.map(r => r.id)));
+                        } else {
+                          setSelectedResultados(new Set());
+                        }
+                      }}
+                    />
+                  </th>
+                )}
+                <th className="p-3 font-semibold">Data</th>
+                <th className="p-3 font-semibold">Candidato</th>
+                <th className="p-3 font-semibold">Grau Pretendido</th>
+                <th className="p-3 font-semibold">Módulo</th>
+                <th className="p-3 font-semibold">Média</th>
+                <th className="p-3 font-semibold">Resultado Final</th>
+                <th className="p-3 font-semibold text-center">Ações</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filteredResultados.map((res) => {
+                const candidato = candidatos.find(c => c.id === res.candidato_id);
+                const modulo = modulos.find(m => m.id === res.modulo_id);
+                const nomeCandidato = candidato ? candidato.nome : res.candidato_nome || 'Desconhecido';
+                const temaModulo = res.isTeorica || res.isProvaTeorica ? res.modulo_nome : (modulo ? (modulo.nome || modulo.tema) : 'Desconhecido');
+                const isKatas = modulo?.tema === 'Katas';
+                
+                return (
+                  <tr key={res.id} className="hover:bg-slate-50 transition-colors">
+                    {isUserAdmin(loggedUser) && (
+                      <td className="p-3 text-center">
+                        <input 
+                          type="checkbox" 
+                          className="rounded text-red-600 focus:ring-red-500 cursor-pointer"
+                          checked={selectedResultados.has(res.id)}
+                          onChange={(e) => {
+                            const newSelected = new Set(selectedResultados);
+                            if (e.target.checked) {
+                              newSelected.add(res.id);
+                            } else {
+                              newSelected.delete(res.id);
+                            }
+                            setSelectedResultados(newSelected);
+                          }}
+                        />
+                      </td>
+                    )}
+                    <td className="p-3 text-sm text-slate-600">
+                      {res.created_at.includes('T') ? new Date(res.created_at).toLocaleDateString('pt-BR') : res.created_at.split('-').reverse().join('/')}
+                    </td>
+                    <td className="p-3 font-medium text-slate-800">
+                      {nomeCandidato}
+                    </td>
+                    <td className="p-3 text-sm text-slate-600">
+                      {res.grau_pretendido}
+                    </td>
+                    <td className="p-3 text-sm text-slate-600">
+                      {temaModulo} {res.isTeorica && <span className="text-xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded ml-1">Teórica</span>}
+                      {res.isProvaTeorica && <span className="text-xs bg-purple-100 text-purple-800 px-1.5 py-0.5 rounded ml-1">Prova</span>}
+                    </td>
+                    <td className="p-3 text-sm text-slate-600">
+                      {res.isTeorica || res.isProvaTeorica
+                        ? (res.media_teorica !== null && res.media_teorica !== undefined ? `${res.media_teorica.toFixed(1)}%` : '-')
+                        : isKatas 
+                          ? (res.nota_kata !== null && res.nota_kata !== undefined ? `${res.nota_kata}%` : '-')
+                          : (res.percentual_waza !== null && res.percentual_waza !== undefined ? `${res.percentual_waza}%` : '-')
+                      }
+                    </td>
+                    <td className="p-3">
+                      <div className="flex flex-col gap-1">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium w-fit ${
+                          res.veredito === 'Aprovado' ? 'bg-emerald-100 text-emerald-800' :
+                          res.veredito === 'Reprovado' ? 'bg-red-100 text-red-800' :
+                          'bg-amber-100 text-amber-800'
+                        }`}>
+                          {res.veredito}
+                        </span>
+                        {!res.isTeorica && !res.isProvaTeorica && (
+                          <span className="text-xs text-slate-400">
+                            {res.avaliadores_count} avaliador{res.avaliadores_count !== 1 ? 'es' : ''}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="p-3 text-center">
+                      <div className="flex items-center justify-center gap-2">
+                        {!res.isTeorica && !res.isProvaTeorica && (
+                          <button 
+                            onClick={() => handlePrintResult(res)}
+                            className="text-slate-500 hover:text-red-600 p-2 rounded-full hover:bg-red-50 transition-colors"
+                            title="Gerar PDF Detalhado"
+                          >
+                            <FileText className="w-5 h-5" />
+                          </button>
+                        )}
+                        {isUserAdmin(loggedUser) && (
+                          <button 
+                            onClick={() => handleDeleteResultados([res.id])}
+                            className="text-slate-400 hover:text-red-600 p-2 rounded-full hover:bg-red-50 transition-colors"
+                            title="Excluir Avaliação"
+                          >
+                            <Trash2 className="w-5 h-5" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+
+  if (loggedRole === 'candidato') {
+    return <CandidatoDashboard 
+      candidato={loggedUser} 
+      onLogout={handleLogout} 
+      resultados={resultados}
+      aggregatedResultados={aggregatedResultados}
+      modulos={modulos}
+      orgSettings={orgSettings} 
+    />;
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans pb-20">
       {/* Header */}
-      <header className="bg-red-700 text-white p-6 shadow-md">
+      <header className="text-white p-6 shadow-md" style={{ backgroundColor: orgSettings?.cor_primaria || '#b91c1c' }}>
         <div className="max-w-5xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <img src="/judo_tech_icon.png" alt="Logo" className="w-[100px] h-[100px] object-contain brightness-0 invert -mr-[15px]" />
+            {orgSettings?.logo_url ? (
+              <img src={orgSettings.logo_url} alt="Logo da Organização" className="w-[80px] h-[80px] object-contain -mr-[10px] rounded-md bg-white/10 p-1" />
+            ) : (
+              <img src="/judo_tech_icon.png" alt="Logo" className="w-[80px] h-[80px] object-contain brightness-0 invert -mr-[10px]" />
+            )}
             <div>
               <h1 className="text-2xl font-black tracking-tight">
-                Sensei Assistente <span className="text-red-200 font-normal">Digital</span>
+                {orgSettings?.nome ? `Portal ${orgSettings.nome}` : 'Portal do'} <span className="text-red-200 font-normal">{loggedRole === 'admin' ? 'Coordenador' : 'Avaliador'}</span>
               </h1>
-              <p className="text-red-100 text-sm">A evolução natural do seu dojo</p>
+              <p className="text-red-100 text-sm">Olá, {loggedUser.nome}</p>
             </div>
           </div>
           
-          <div className="flex flex-col md:flex-row items-center gap-4">
+            <div className="flex flex-col md:flex-row items-center gap-4">
+            {/* Offline Sync Indicator */}
+            {!isOnline && (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-500/20 text-yellow-100 rounded-full text-xs font-medium border border-yellow-500/30">
+                <WifiOff className="w-3.5 h-3.5" />
+                <span>Offline</span>
+                {syncQueueLength > 0 && (
+                  <span className="bg-yellow-500 text-yellow-950 px-1.5 py-0.5 rounded-full ml-1">
+                    {syncQueueLength} pendentes
+                  </span>
+                )}
+              </div>
+            )}
+            {isOnline && syncQueueLength > 0 && (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/20 text-blue-100 rounded-full text-xs font-medium border border-blue-500/30">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                <span>Sincronizando ({syncQueueLength})...</span>
+              </div>
+            )}
+            
+            {deferredPrompt && (
+              <button
+                onClick={handleInstallClick}
+                className="flex items-center gap-2 px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-full text-xs font-medium transition-colors border border-white/30"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Instalar App
+              </button>
+            )}
+
             {/* Main Navigation Tabs */}
-            <div className="flex flex-wrap justify-center bg-red-800 rounded-lg p-1">
-              {loggedRole === 'avaliador' && (
+            <div className="flex flex-wrap justify-center rounded-lg p-1" style={{ backgroundColor: 'rgba(0,0,0,0.2)' }}>
+              {(loggedRole === 'avaliador' || loggedRole === 'admin' || loggedRole === 'coordenador') && (
                 <button 
                   onClick={() => { setMainTab('avaliacao'); setCurrentView('avaliacao'); }}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${mainTab === 'avaliacao' ? 'bg-white text-red-700 shadow-sm' : 'text-red-100 hover:bg-red-700'}`}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${mainTab === 'avaliacao' ? 'bg-white shadow-sm' : 'text-white/80 hover:bg-white/10'}`}
+                  style={mainTab === 'avaliacao' ? { color: orgSettings?.cor_primaria || '#b91c1c' } : {}}
                 >
                   <ClipboardSignature className="w-4 h-4" /> Avaliação
                 </button>
@@ -2272,38 +3038,42 @@ export default function App() {
               {isUserAdmin(loggedUser) && (
                 <button 
                   onClick={() => { setMainTab('configuracao'); if (currentView === 'avaliacao') setCurrentView('candidatos'); }}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${mainTab === 'configuracao' ? 'bg-white text-red-700 shadow-sm' : 'text-red-100 hover:bg-red-700'}`}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${mainTab === 'configuracao' ? 'bg-white shadow-sm' : 'text-white/80 hover:bg-white/10'}`}
+                  style={mainTab === 'configuracao' ? { color: orgSettings?.cor_primaria || '#b91c1c' } : {}}
                 >
                   <Settings className="w-4 h-4" /> Configuração
                 </button>
               )}
               <button 
                 onClick={() => { setMainTab('resultados'); setCurrentView('resultados'); }}
-                className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${mainTab === 'resultados' ? 'bg-white text-red-700 shadow-sm' : 'text-red-100 hover:bg-red-700'}`}
+                className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${mainTab === 'resultados' ? 'bg-white shadow-sm' : 'text-white/80 hover:bg-white/10'}`}
+                style={mainTab === 'resultados' ? { color: orgSettings?.cor_primaria || '#b91c1c' } : {}}
               >
                 <FileText className="w-4 h-4" /> Resultados
               </button>
-              {loggedRole === 'candidato' && (
-                <button 
-                  onClick={() => { setMainTab('realizar_prova'); setCurrentView('realizar_prova'); }}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${mainTab === 'realizar_prova' ? 'bg-white text-red-700 shadow-sm' : 'text-red-100 hover:bg-red-700'}`}
-                >
-                  <CheckSquare className="w-4 h-4" /> Minhas Provas
-                </button>
-              )}
               {isUserAdmin(loggedUser) && (
                 <button 
                   onClick={() => { setMainTab('treinamento'); setCurrentView('treinamento'); }}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${mainTab === 'treinamento' ? 'bg-white text-red-700 shadow-sm' : 'text-red-100 hover:bg-red-700'}`}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${mainTab === 'treinamento' ? 'bg-white shadow-sm' : 'text-white/80 hover:bg-white/10'}`}
+                  style={mainTab === 'treinamento' ? { color: orgSettings?.cor_primaria || '#b91c1c' } : {}}
                 >
                   <GraduationCap className="w-4 h-4" /> Treinamento
+                </button>
+              )}
+              {loggedUser?.is_super_admin && (
+                <button 
+                  onClick={() => { setMainTab('super_admin'); setCurrentView('super_admin' as any); }}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${mainTab === 'super_admin' ? 'bg-white shadow-sm' : 'text-white/80 hover:bg-white/10'}`}
+                  style={mainTab === 'super_admin' ? { color: orgSettings?.cor_primaria || '#b91c1c' } : {}}
+                >
+                  <ShieldCheck className="w-4 h-4" /> Super Admin
                 </button>
               )}
             </div>
 
             <button 
               onClick={handleLogout}
-              className="flex items-center gap-2 text-red-100 hover:text-white text-sm font-medium"
+              className="flex items-center gap-2 text-white/80 hover:text-white text-sm font-medium transition-colors"
               title="Sair"
             >
               <LogOut className="w-4 h-4" /> Sair
@@ -2317,6 +3087,15 @@ export default function App() {
         {/* Sub-Navigation for Configuração */}
         {isUserAdmin(loggedUser) && mainTab === 'configuracao' && (
           <div className="flex flex-wrap gap-2 mb-6 bg-white p-2 rounded-lg shadow-sm border border-slate-200">
+            <button 
+              onClick={() => {
+                setCurrentView('organizacao');
+                if (orgSettings) setEditingOrgSettings(orgSettings);
+              }}
+              className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${currentView === 'organizacao' ? 'bg-red-50 text-red-700 border border-red-200' : 'text-slate-600 hover:bg-slate-50 border border-transparent'}`}
+            >
+              <Settings className="w-4 h-4" /> Identidade Visual
+            </button>
             <button 
               onClick={() => setCurrentView('candidatos')}
               className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${currentView === 'candidatos' ? 'bg-red-50 text-red-700 border border-red-200' : 'text-slate-600 hover:bg-slate-50 border border-transparent'}`}
@@ -2359,6 +3138,78 @@ export default function App() {
             >
               <CheckSquare className="w-4 h-4" /> Provas Teóricas
             </button>
+          </div>
+        )}
+
+        {/* VIEW: IDENTIDADE VISUAL */}
+        {isUserAdmin(loggedUser) && mainTab === 'configuracao' && currentView === 'organizacao' && (
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 animate-in fade-in">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 border-b pb-4">
+              <h2 className="text-xl font-bold flex items-center gap-2">
+                <Settings className="w-6 h-6 text-red-600" /> Identidade Visual da Organização
+              </h2>
+            </div>
+            
+            <div className="max-w-2xl">
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-slate-700 mb-1">Nome da Organização</label>
+                <input 
+                  type="text" 
+                  value={editingOrgSettings?.nome || ''} 
+                  onChange={e => setEditingOrgSettings(prev => prev ? {...prev, nome: e.target.value} : null)}
+                  className="w-full p-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-red-500 outline-none"
+                  placeholder="Ex: FEBAJU"
+                />
+              </div>
+              
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-slate-700 mb-1">URL do Logo (Opcional)</label>
+                <input 
+                  type="text" 
+                  value={editingOrgSettings?.logo_url || ''} 
+                  onChange={e => setEditingOrgSettings(prev => prev ? {...prev, logo_url: e.target.value} : null)}
+                  className="w-full p-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-red-500 outline-none"
+                  placeholder="https://exemplo.com/logo.png"
+                />
+                <p className="text-xs text-slate-500 mt-1">Insira o link direto para a imagem do logo (PNG, JPG, SVG).</p>
+                {editingOrgSettings?.logo_url && (
+                  <div className="mt-3 p-4 border border-slate-200 rounded-md bg-slate-50 inline-block">
+                    <p className="text-xs text-slate-500 mb-2">Pré-visualização:</p>
+                    <img src={editingOrgSettings.logo_url} alt="Logo Preview" className="h-12 object-contain" onError={(e) => { (e.target as HTMLImageElement).src = ''; }} />
+                  </div>
+                )}
+              </div>
+              
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-slate-700 mb-1">Cor Primária</label>
+                <div className="flex items-center gap-3">
+                  <input 
+                    type="color" 
+                    value={editingOrgSettings?.cor_primaria || '#b91c1c'} 
+                    onChange={e => setEditingOrgSettings(prev => prev ? {...prev, cor_primaria: e.target.value} : null)}
+                    className="h-10 w-10 cursor-pointer border-0 p-0 rounded-md"
+                  />
+                  <input 
+                    type="text" 
+                    value={editingOrgSettings?.cor_primaria || '#b91c1c'} 
+                    onChange={e => setEditingOrgSettings(prev => prev ? {...prev, cor_primaria: e.target.value} : null)}
+                    className="p-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-red-500 outline-none uppercase w-32"
+                    placeholder="#B91C1C"
+                  />
+                </div>
+                <p className="text-xs text-slate-500 mt-1">Esta cor será usada no cabeçalho e em botões principais.</p>
+              </div>
+              
+              <div className="pt-4 border-t border-slate-200 flex justify-end">
+                <button 
+                  onClick={handleSaveOrgSettings}
+                  disabled={isSavingOrg}
+                  className="bg-red-700 hover:bg-red-800 text-white px-6 py-2 rounded-md font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
+                >
+                  {isSavingOrg ? 'Salvando...' : 'Salvar Configurações'}
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -2816,22 +3667,22 @@ export default function App() {
 
         {/* VIEW: AVALIAÇÕES TEÓRICAS */}
         {isUserAdmin(loggedUser) && mainTab === 'configuracao' && currentView === 'avaliacoes_teoricas' && (
-          <AvaliacoesTeoricas />
+          <AvaliacoesTeoricas loggedUser={loggedUser} />
         )}
 
         {/* VIEW: BANCO DE QUESTÕES */}
         {isUserAdmin(loggedUser) && mainTab === 'configuracao' && currentView === 'banco_questoes' && (
-          <BancoQuestoes />
+          <BancoQuestoes loggedUser={loggedUser} />
         )}
 
         {/* VIEW: PROVAS TEÓRICAS */}
         {isUserAdmin(loggedUser) && mainTab === 'configuracao' && currentView === 'provas_teoricas' && (
-          <ProvasTeoricasAdmin />
+          <ProvasTeoricasAdmin loggedUser={loggedUser} />
         )}
 
         {/* VIEW: REALIZAR PROVA (CANDIDATO) */}
         {loggedRole === 'candidato' && mainTab === 'realizar_prova' && currentView === 'realizar_prova' && (
-          <RealizarProva candidatoId={loggedUser.id} />
+          <RealizarProva candidatoId={loggedUser.id} loggedUser={loggedUser} />
         )}
 
         {/* VIEW: AVALIAÇÃO */}
@@ -2841,7 +3692,7 @@ export default function App() {
               <h2 className="text-xl font-bold flex items-center gap-2">
                 <ClipboardSignature className="w-6 h-6 text-red-600" /> Módulos de Avaliação
               </h2>
-              {(loggedRole === 'avaliador' && ('funcao' in loggedUser) && (isUserAdmin(loggedUser) || loggedUser.funcao === 'coordenador')) && (
+              {(isUserAdmin(loggedUser) || loggedRole === 'coordenador' || (loggedRole === 'avaliador' && ('funcao' in loggedUser) && loggedUser.funcao === 'coordenador')) && (
                 <button 
                   onClick={() => setIsCreatingModulo(true)} 
                   className="bg-red-700 hover:bg-red-800 text-white px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 transition-colors"
@@ -2882,7 +3733,7 @@ export default function App() {
                   <div className="lg:col-span-2 relative">
                     <label className="block text-sm font-medium text-slate-700 mb-1">Tema (Grupo)</label>
                     <div className="border border-slate-300 rounded-md p-2 bg-white max-h-40 overflow-y-auto">
-                      {['Te Waza', 'Koshi Waza', 'Ashi waza', 'Sutemi Waza', 'Ossae Waza', 'Shime Waza', 'Kansetsu Waza', 'Kaeshi Waza', 'Renraku Henka Waza', 'Katas'].map(tema => (
+                      {['Te Waza', 'Koshi Waza', 'Ashi waza', 'Sutemi Waza', 'Osae Waza', 'Shime Waza', 'Kansetsu Waza', 'Kaeshi Waza', 'Renraku Henka Waza', 'Katas'].map(tema => (
                         <label key={tema} className="flex items-center gap-2 p-1 hover:bg-slate-50 rounded cursor-pointer">
                           <input 
                             type="checkbox" 
@@ -2991,20 +3842,31 @@ export default function App() {
                 return dateA - dateB;
               }).map(m => (
                 <div key={m.id} className="border border-slate-200 rounded-xl p-5 hover:border-red-300 hover:shadow-md transition-all bg-white flex flex-col h-full relative group">
-                  {(loggedRole === 'avaliador' && ('funcao' in loggedUser) && (isUserAdmin(loggedUser) || m.coordenadores_ids?.includes(loggedUser.id))) && (
-                    <button 
-                      onClick={() => {
-                        setEditingModuloId(m.id);
-                        setNewModulo(m);
-                        setIsCreatingModulo(true);
-                      }}
-                      className="absolute top-4 right-4 p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors opacity-0 group-hover:opacity-100"
-                      title="Editar Módulo"
-                    >
-                      <Edit className="w-4 h-4" />
-                    </button>
-                  )}
-                  <div className="font-bold text-lg mb-1 text-slate-800 line-clamp-2 pr-8">{m.nome || m.tema || 'Sem Nome'}</div>
+                  <div className="absolute top-4 right-4 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {(isUserAdmin(loggedUser) || loggedRole === 'coordenador' || (loggedRole === 'avaliador' && ('funcao' in loggedUser) && m.coordenadores_ids?.includes(loggedUser.id))) && (
+                      <button 
+                        onClick={() => {
+                          setEditingModuloId(m.id);
+                          setNewModulo(m);
+                          setIsCreatingModulo(true);
+                        }}
+                        className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
+                        title="Editar Módulo"
+                      >
+                        <Edit className="w-4 h-4" />
+                      </button>
+                    )}
+                    {isUserAdmin(loggedUser) && (
+                      <button 
+                        onClick={() => handleDeleteModulo(m.id)}
+                        className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
+                        title="Excluir Módulo"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                  <div className="font-bold text-lg mb-1 text-slate-800 line-clamp-2 pr-16">{m.nome || m.tema || 'Sem Nome'}</div>
                   {m.nome && m.tema && <div className="text-xs font-medium text-red-600 mb-3 bg-red-50 inline-block px-2 py-1 rounded">{m.tema}</div>}
                   {!m.nome && <div className="mb-3"></div>}
                   <div className="text-sm text-slate-600 space-y-2 flex-grow">
@@ -3096,12 +3958,15 @@ export default function App() {
                       className="w-full p-2 border border-slate-300 rounded-md outline-none bg-slate-100 text-slate-500 cursor-not-allowed"
                     >
                       <option value="">Selecione um avaliador...</option>
+                      {selectedAvaliadorId && !avaliadores.find(a => a.id === selectedAvaliadorId) && loggedUser && (
+                        <option value={selectedAvaliadorId}>{loggedUser.nome} ({loggedRole})</option>
+                      )}
                       {[...avaliadores].sort((a, b) => a.nome.localeCompare(b.nome)).map(a => (
                         <option key={a.id} value={a.id}>{a.nome} ({a.graduacao})</option>
                       ))}
                     </select>
                     
-                    {(loggedRole === 'avaliador' && ('funcao' in loggedUser) && (isUserAdmin(loggedUser) || modulos.find(m => m.id === selectedModuloId)?.coordenadores_ids?.includes(loggedUser.id))) && (
+                    {(isUserAdmin(loggedUser) || loggedRole === 'coordenador' || (loggedRole === 'avaliador' && ('funcao' in loggedUser) && modulos.find(m => m.id === selectedModuloId)?.coordenadores_ids?.includes(loggedUser.id))) && (
                       <div className="mt-2 flex items-center gap-2">
                         <input 
                           type="checkbox" 
@@ -3219,7 +4084,8 @@ export default function App() {
                                         nome: manualCandidateName, 
                                         grau_pretendido: targetDan, 
                                         dojo: manualDojo, 
-                                        zempo: manualZempo 
+                                        zempo: manualZempo,
+                                        organizacao_id: loggedUser?.organizacao_id
                                       }]).select();
                                       
                                       if (error) throw error;
@@ -3411,14 +4277,14 @@ export default function App() {
                           <option value="Koshi Waza">Koshi Waza</option>
                           <option value="Ashi waza">Ashi waza</option>
                           <option value="Sutemi Waza">Sutemi Waza</option>
-                          <option value="Ossae Waza">Ossae Waza</option>
+                          <option value="Osae Waza">Osae Waza</option>
                           <option value="Shime Waza">Shime Waza</option>
                           <option value="Kansetsu Waza">Kansetsu Waza</option>
                           <option value="Kaeshi Waza">Kaeshi Waza</option>
                           <option value="Renraku Henka Waza">Renraku Henka Waza</option>
                           <option value="Katas">Katas</option>
                           {Array.from<string>(new Set(tecnicas.map(t => t.grupo)))
-                            .filter(g => !['Te Waza', 'Koshi Waza', 'Ashi waza', 'Sutemi Waza', 'Ossae Waza', 'Shime Waza', 'Kansetsu Waza', 'Kaeshi Waza', 'Renraku Henka Waza', 'Katas'].includes(g))
+                            .filter(g => !['Te Waza', 'Koshi Waza', 'Ashi waza', 'Sutemi Waza', 'Osae Waza', 'Shime Waza', 'Kansetsu Waza', 'Kaeshi Waza', 'Renraku Henka Waza', 'Katas'].includes(g))
                             .filter(Boolean)
                             .sort()
                             .map(tema => (
@@ -3444,13 +4310,20 @@ export default function App() {
                   <div className="mt-4 pt-4 border-t border-slate-200">
                     <button 
                       onClick={broadcastDraw}
-                      className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-md font-medium flex items-center justify-center gap-2 transition-colors shadow-sm"
+                      disabled={!selectedCandidatoId}
+                      className={`w-full py-3 rounded-md font-medium flex items-center justify-center gap-2 transition-colors shadow-sm ${
+                        !selectedCandidatoId 
+                          ? 'bg-slate-300 text-slate-500 cursor-not-allowed' 
+                          : 'bg-blue-600 hover:bg-blue-700 text-white'
+                      }`}
                     >
                       <Radio className="w-5 h-5" />
                       Transmitir Sorteio para a Banca
                     </button>
                     <p className="text-xs text-slate-500 text-center mt-2">
-                      Clique para enviar as técnicas atuais para a tela dos outros avaliadores.
+                      {!selectedCandidatoId 
+                        ? 'Selecione um candidato primeiro para transmitir o sorteio.' 
+                        : 'Clique para enviar as técnicas atuais para a tela dos outros avaliadores.'}
                     </p>
                   </div>
                 )}
@@ -3751,11 +4624,26 @@ export default function App() {
                           </div>
                           {reportData.pedagogicalObs.length > 0 && (
                             <div className="mt-3 bg-slate-50 p-3 rounded-md border border-slate-200 text-sm">
-                              <span className="font-semibold text-slate-700 block mb-1">Observações Pedagógicas:</span>
-                              <ul className="space-y-1 text-slate-600">
-                                {reportData.pedagogicalObs.map((obs, i) => (
-                                  <li key={i} className="flex items-start gap-1"><ChevronRight className="w-4 h-4 text-red-400 shrink-0 mt-0.5" /><span>{obs}</span></li>
-                                ))}
+                              <span className="font-semibold text-slate-700 block mb-2">Observações Pedagógicas:</span>
+                              <ul className="space-y-4 text-slate-600">
+                                {reportData.pedagogicalObs.map((obs, i) => {
+                                  const lines = obs.split('\n');
+                                  return (
+                                    <li key={i} className="flex flex-col">
+                                      {lines.map((line, j) => {
+                                        if (line.startsWith('**') && line.endsWith('**')) {
+                                          return <strong key={j} className="text-slate-800 mb-1">{line.replace(/\*\*/g, '')}</strong>;
+                                        }
+                                        return (
+                                          <span key={j} className="flex items-start gap-1 ml-2">
+                                            <ChevronRight className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                                            <span>{line}</span>
+                                          </span>
+                                        );
+                                      })}
+                                    </li>
+                                  );
+                                })}
                               </ul>
                             </div>
                           )}
@@ -3836,207 +4724,14 @@ export default function App() {
         )}
 
         {/* VIEW: RESULTADOS */}
-        {mainTab === 'resultados' && (
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 animate-in fade-in">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 border-b pb-4 gap-4">
-              <h2 className="text-xl font-bold flex items-center gap-2">
-                <FileText className="w-6 h-6 text-red-600" /> Resultados das Avaliações
-              </h2>
-              <div className="flex items-center gap-2">
-                {isUserAdmin(loggedUser) && selectedResultados.size > 0 && (
-                  <button 
-                    onClick={() => handleDeleteResultados(Array.from(selectedResultados))}
-                    className="text-sm bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1.5 rounded-md flex items-center gap-1 transition-colors"
-                  >
-                    <Trash2 className="w-4 h-4" /> Excluir Selecionados ({selectedResultados.size})
-                  </button>
-                )}
-                <button 
-                  onClick={fetchResultados}
-                  disabled={isLoadingResultados}
-                  className="text-sm bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-md flex items-center gap-1 transition-colors disabled:opacity-50"
-                >
-                  {isLoadingResultados ? 'Atualizando...' : 'Atualizar'}
-                </button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Módulo</label>
-                <select value={filtroModulo} onChange={(e) => setFiltroModulo(e.target.value)} className="w-full p-2 text-sm border border-slate-300 rounded-md bg-white outline-none focus:ring-2 focus:ring-red-500">
-                  <option value="">Todos</option>
-                  {Array.from(new Set(aggregatedResultados.map(res => {
-                    const modulo = modulos.find(m => m.id === res.modulo_id);
-                    return res.isTeorica || res.isProvaTeorica ? res.modulo_nome : (modulo ? modulo.tema : 'Desconhecido');
-                  }))).map(tema => (
-                    <option key={tema} value={tema}>{tema}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Grau Pretendido</label>
-                <select value={filtroGrau} onChange={(e) => setFiltroGrau(e.target.value)} className="w-full p-2 text-sm border border-slate-300 rounded-md bg-white outline-none focus:ring-2 focus:ring-red-500">
-                  <option value="">Todos</option>
-                  {Array.from(new Set(aggregatedResultados.map(res => res.grau_pretendido))).map(grau => (
-                    <option key={grau} value={grau}>{grau}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Candidato</label>
-                <input 
-                  type="text" 
-                  value={filtroCandidato} 
-                  onChange={(e) => setFiltroCandidato(e.target.value)} 
-                  placeholder="Buscar por nome..."
-                  className="w-full p-2 text-sm border border-slate-300 rounded-md bg-white outline-none focus:ring-2 focus:ring-red-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Resultado Final</label>
-                <select value={filtroResultado} onChange={(e) => setFiltroResultado(e.target.value)} className="w-full p-2 text-sm border border-slate-300 rounded-md bg-white outline-none focus:ring-2 focus:ring-red-500">
-                  <option value="">Todos</option>
-                  <option value="Aprovado">Aprovado</option>
-                  <option value="Pendente">Pendente</option>
-                  <option value="Reprovado">Reprovado</option>
-                </select>
-              </div>
-            </div>
-
-            {isLoadingResultados ? (
-              <div className="text-center py-8 text-slate-500">Carregando resultados...</div>
-            ) : filteredResultados.length === 0 ? (
-              <div className="text-center py-8 text-slate-500">Nenhum resultado encontrado.</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50 text-slate-600 text-sm uppercase tracking-wider border-b border-slate-200">
-                      {isUserAdmin(loggedUser) && (
-                        <th className="p-3 w-12 text-center">
-                          <input 
-                            type="checkbox" 
-                            className="rounded text-red-600 focus:ring-red-500 cursor-pointer"
-                            checked={selectedResultados.size === filteredResultados.length && filteredResultados.length > 0}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSelectedResultados(new Set(filteredResultados.map(r => r.id)));
-                              } else {
-                                setSelectedResultados(new Set());
-                              }
-                            }}
-                          />
-                        </th>
-                      )}
-                      <th className="p-3 font-semibold">Data</th>
-                      <th className="p-3 font-semibold">Candidato</th>
-                      <th className="p-3 font-semibold">Grau Pretendido</th>
-                      <th className="p-3 font-semibold">Módulo</th>
-                      <th className="p-3 font-semibold">Média</th>
-                      <th className="p-3 font-semibold">Resultado Final</th>
-                      <th className="p-3 font-semibold text-center">Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {filteredResultados.map((res) => {
-                      const candidato = candidatos.find(c => c.id === res.candidato_id);
-                      const modulo = modulos.find(m => m.id === res.modulo_id);
-                      const nomeCandidato = candidato ? candidato.nome : res.candidato_nome || 'Desconhecido';
-                      const temaModulo = res.isTeorica || res.isProvaTeorica ? res.modulo_nome : (modulo ? (modulo.nome || modulo.tema) : 'Desconhecido');
-                      const isKatas = modulo?.tema === 'Katas';
-                      
-                      return (
-                        <tr key={res.id} className="hover:bg-slate-50 transition-colors">
-                          {isUserAdmin(loggedUser) && (
-                            <td className="p-3 text-center">
-                              <input 
-                                type="checkbox" 
-                                className="rounded text-red-600 focus:ring-red-500 cursor-pointer"
-                                checked={selectedResultados.has(res.id)}
-                                onChange={(e) => {
-                                  const newSelected = new Set(selectedResultados);
-                                  if (e.target.checked) {
-                                    newSelected.add(res.id);
-                                  } else {
-                                    newSelected.delete(res.id);
-                                  }
-                                  setSelectedResultados(newSelected);
-                                }}
-                              />
-                            </td>
-                          )}
-                          <td className="p-3 text-sm text-slate-600">
-                            {res.created_at.includes('T') ? new Date(res.created_at).toLocaleDateString('pt-BR') : res.created_at.split('-').reverse().join('/')}
-                          </td>
-                          <td className="p-3 font-medium text-slate-800">
-                            {nomeCandidato}
-                          </td>
-                          <td className="p-3 text-sm text-slate-600">
-                            {res.grau_pretendido}
-                          </td>
-                          <td className="p-3 text-sm text-slate-600">
-                            {temaModulo} {res.isTeorica && <span className="text-xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded ml-1">Teórica</span>}
-                            {res.isProvaTeorica && <span className="text-xs bg-purple-100 text-purple-800 px-1.5 py-0.5 rounded ml-1">Prova</span>}
-                          </td>
-                          <td className="p-3 text-sm text-slate-600">
-                            {res.isTeorica || res.isProvaTeorica
-                              ? (res.media_teorica !== null && res.media_teorica !== undefined ? `${res.media_teorica.toFixed(1)}%` : '-')
-                              : isKatas 
-                                ? (res.nota_kata !== null && res.nota_kata !== undefined ? `${res.nota_kata}%` : '-')
-                                : (res.percentual_waza !== null && res.percentual_waza !== undefined ? `${res.percentual_waza}%` : '-')
-                            }
-                          </td>
-                          <td className="p-3">
-                            <div className="flex flex-col gap-1">
-                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium w-fit ${
-                                res.veredito === 'Aprovado' ? 'bg-emerald-100 text-emerald-800' :
-                                res.veredito === 'Reprovado' ? 'bg-red-100 text-red-800' :
-                                'bg-amber-100 text-amber-800'
-                              }`}>
-                                {res.veredito}
-                              </span>
-                              {!res.isTeorica && !res.isProvaTeorica && (
-                                <span className="text-xs text-slate-400">
-                                  {res.avaliadores_count} avaliador{res.avaliadores_count !== 1 ? 'es' : ''}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="p-3 text-center">
-                            <div className="flex items-center justify-center gap-2">
-                              {!res.isTeorica && !res.isProvaTeorica && (
-                                <button 
-                                  onClick={() => handlePrintResult(res)}
-                                  className="text-slate-500 hover:text-red-600 p-2 rounded-full hover:bg-red-50 transition-colors"
-                                  title="Gerar PDF Detalhado"
-                                >
-                                  <FileText className="w-5 h-5" />
-                                </button>
-                              )}
-                              {isUserAdmin(loggedUser) && (
-                                <button 
-                                  onClick={() => handleDeleteResultados([res.id])}
-                                  className="text-slate-400 hover:text-red-600 p-2 rounded-full hover:bg-red-50 transition-colors"
-                                  title="Excluir Avaliação"
-                                >
-                                  <Trash2 className="w-5 h-5" />
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
+        {mainTab === 'resultados' && renderResultados()}
 
         {isUserAdmin(loggedUser) && mainTab === 'treinamento' && (
           <TreinamentoCapacitacao loggedUser={loggedUser} loggedRole={loggedRole} />
+        )}
+
+        {loggedUser?.is_super_admin && mainTab === 'super_admin' && (
+          <SuperAdminPanel />
         )}
 
       </main>
@@ -5318,6 +6013,36 @@ export default function App() {
               </button>
               <button 
                 onClick={confirmDeleteTecnicas}
+                className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 font-medium transition-colors flex items-center gap-2"
+              >
+                <Trash2 className="w-4 h-4" />
+                Sim, Excluir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmação de Exclusão de Módulos */}
+      {modulosToDelete && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 animate-in fade-in">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 animate-in zoom-in-95">
+            <div className="flex items-center gap-3 mb-4 text-red-600">
+              <AlertTriangle className="w-8 h-8" />
+              <h3 className="text-xl font-bold">Confirmar Exclusão</h3>
+            </div>
+            <p className="text-slate-600 mb-6">
+              Tem certeza que deseja excluir {modulosToDelete.length === 1 ? 'este módulo' : `estes ${modulosToDelete.length} módulos`}? Esta ação não pode ser desfeita e os dados serão removidos do banco de dados.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button 
+                onClick={() => setModulosToDelete(null)}
+                className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-md font-medium transition-colors"
+              >
+                Cancelar
+              </button>
+              <button 
+                onClick={confirmDeleteModulo}
                 className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 font-medium transition-colors flex items-center gap-2"
               >
                 <Trash2 className="w-4 h-4" />
