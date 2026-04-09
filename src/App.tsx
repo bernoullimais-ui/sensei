@@ -1940,6 +1940,12 @@ export default function App() {
       }
     }
 
+    if (!isCoordinator && followingCoordinatorId) {
+      // If following a coordinator and no cache was loaded, do not reset lists.
+      // The broadcast receiver will handle setting the lists.
+      return;
+    }
+
     // If no cache or cache expired, reset and draw (if coordinator)
     setShowReport(false);
     setHighDanEval({ creativity: '', innovation: '', efficiency: '' });
@@ -1956,10 +1962,10 @@ export default function App() {
       } else {
         sortearTecnicas();
       }
-    } else {
+    } else if (!followingCoordinatorId) {
       setWazaList([]);
     }
-  }, [selectedCandidatoId, targetDan, selectedTema, quantidadeSorteio, sortearTecnicas, isCoordinator, selectedModuloId, loggedUser, showToast]);
+  }, [selectedCandidatoId, targetDan, selectedTema, quantidadeSorteio, sortearTecnicas, isCoordinator, selectedModuloId, loggedUser, showToast, followingCoordinatorId]);
 
   const generateKataEvaluation = (group: string, mode: 'completo' | 'serie') => {
     if (!group) {
@@ -2287,8 +2293,8 @@ export default function App() {
     if (!selectedModuloId) return;
 
     let channelName = '';
-    if (isCoordinator && loggedUser) {
-      channelName = `modulo_${selectedModuloId}_coord_${loggedUser.id}`;
+    if (isCoordinator && selectedAvaliadorId) {
+      channelName = `modulo_${selectedModuloId}_coord_${selectedAvaliadorId}`;
     } else if (followingCoordinatorId) {
       channelName = `modulo_${selectedModuloId}_coord_${followingCoordinatorId}`;
     } else {
@@ -2317,13 +2323,8 @@ export default function App() {
         setShowReport(false);
         setPendingAutoSave(false);
 
-        setWazaList(payload.wazaList.map((pw: any) => {
-          // We don't have access to prev here easily without a ref, but in a sync scenario, 
-          // we usually want to reset to AVALIAR anyway if it's a new draw.
-          // If we need to preserve, we can use the current wazaList state, but since this
-          // is a direct broadcast of a new draw, resetting is usually correct.
-          // To be safe and preserve if possible, we use the current wazaList state.
-          const existing = wazaList.find((w: any) => w.name === pw.name);
+        setWazaList(prevWazaList => payload.wazaList.map((pw: any) => {
+          const existing = prevWazaList.find((w: any) => w.name === pw.name);
           return {
             id: pw.id,
             name: pw.name,
@@ -2333,8 +2334,8 @@ export default function App() {
           };
         }));
 
-        setKihonList(payload.kihonList.map((pk: any) => {
-          const existing = kihonList.find((k: any) => k.name === pk.name);
+        setKihonList(prevKihonList => payload.kihonList.map((pk: any) => {
+          const existing = prevKihonList.find((k: any) => k.name === pk.name);
           return {
             id: pk.id,
             name: pk.name,
@@ -2342,8 +2343,8 @@ export default function App() {
           };
         }));
 
-        setKataList(payload.kataList.map((pk: any) => {
-          const existing = kataList.find((k: any) => k.name === pk.name);
+        setKataList(prevKataList => payload.kataList.map((pk: any) => {
+          const existing = prevKataList.find((k: any) => k.name === pk.name);
           return {
             id: pk.id,
             name: pk.name,
@@ -2428,10 +2429,13 @@ export default function App() {
       supabase.removeChannel(channel);
       channelRef.current = null;
     };
-  }, [selectedModuloId, isCoordinator, followingCoordinatorId, loggedUser, showToast]);
+  }, [selectedModuloId, isCoordinator, followingCoordinatorId, loggedUser, showToast, selectedAvaliadorId]);
 
   const broadcastDraw = () => {
-    if (!channelRef.current) return;
+    if (!channelRef.current) {
+      showToast('Erro: Conexão com a banca não estabelecida. Verifique se você selecionou o Avaliador Responsável.', 'error');
+      return;
+    }
     if (!selectedCandidatoId) {
       showToast('Selecione um candidato antes de transmitir o sorteio.', 'error');
       return;
@@ -3954,8 +3958,9 @@ export default function App() {
                     <label className="block text-sm font-medium text-slate-700 mb-1">Avaliador Responsável</label>
                     <select 
                       value={selectedAvaliadorId}
-                      disabled
-                      className="w-full p-2 border border-slate-300 rounded-md outline-none bg-slate-100 text-slate-500 cursor-not-allowed"
+                      disabled={!isUserAdmin(loggedUser)}
+                      onChange={(e) => setSelectedAvaliadorId(e.target.value)}
+                      className={`w-full p-2 border border-slate-300 rounded-md outline-none ${!isUserAdmin(loggedUser) ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : 'bg-white focus:ring-2 focus:ring-red-500'}`}
                     >
                       <option value="">Selecione um avaliador...</option>
                       {selectedAvaliadorId && !avaliadores.find(a => a.id === selectedAvaliadorId) && loggedUser && (
@@ -3965,6 +3970,11 @@ export default function App() {
                         <option key={a.id} value={a.id}>{a.nome} ({a.graduacao})</option>
                       ))}
                     </select>
+                    {isUserAdmin(loggedUser) && (
+                      <p className="text-xs text-slate-500 mt-1">
+                        Como administrador, você pode selecionar qual avaliador/coordenador deseja representar para transmitir o sorteio.
+                      </p>
+                    )}
                     
                     {(isUserAdmin(loggedUser) || loggedRole === 'coordenador' || (loggedRole === 'avaliador' && ('funcao' in loggedUser) && modulos.find(m => m.id === selectedModuloId)?.coordenadores_ids?.includes(loggedUser.id))) && (
                       <div className="mt-2 flex items-center gap-2">
