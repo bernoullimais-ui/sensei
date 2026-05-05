@@ -1334,7 +1334,7 @@ export function CursosAdmin() {
                               <div 
                                 ref={provided.innerRef} 
                                 {...provided.draggableProps} 
-                                className="border border-slate-200 rounded-lg bg-white overflow-hidden shadow-sm"
+                                className="border border-slate-200 rounded-lg bg-white shadow-sm"
                               >
                                 <div className="flex justify-between items-center p-4 bg-white border-b border-slate-200 group">
                                   <div className="flex items-center gap-3">
@@ -1483,38 +1483,46 @@ export function CursosAdmin() {
                         )}
                       </Droppable>
                       
-                      <div className="p-4 bg-slate-100 flex gap-6 text-sm font-medium text-blue-600 relative">
+                      <div className="p-4 bg-slate-100 flex gap-6 text-sm font-medium text-blue-600 relative rounded-b-lg">
                         <div>
                           <button 
-                            onClick={() => setAddingStepToSection(addingStepToSection === section.id ? null : section.id)}
+                            onClick={() => {
+                              const sid = section.id || `sec-${sIdx}`;
+                              setAddingStepToSection(addingStepToSection === sid ? null : sid);
+                            }}
                             className="flex items-center gap-1 hover:underline text-blue-500"
                           >
                             <Plus className="w-4 h-4"/> Adicionar etapa
                           </button>
-                          {addingStepToSection === section.id && (
+                          {addingStepToSection === (section.id || `sec-${sIdx}`) && (
                             <div className="absolute top-full left-4 mt-2 w-48 bg-white border border-slate-200 rounded-lg shadow-lg py-2 z-20">
                                <button onClick={() => {
-                                 setEditingStep({ nome: '', secaoId: section.id, tipo: 'artigo', descricao: '' });
+                                 const sid = section.id || `sec-${sIdx}`;
+                                 setEditingStep({ nome: '', secaoId: sid, tipo: 'artigo', descricao: '' });
                                  setViewConteudo('edit_step_artigo');
                                  setAddingStepToSection(null);
                                }} className="w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center gap-2 text-slate-700"><FileText className="w-4 h-4 text-slate-400"/> Artigo</button>
                                <button onClick={() => {
-                                 setEditingStep({ nome: '', secaoId: section.id, tipo: 'video', descricao: '', url_video: '', tempo_video: '' });
+                                 const sid = section.id || `sec-${sIdx}`;
+                                 setEditingStep({ nome: '', secaoId: sid, tipo: 'video', descricao: '', url_video: '', tempo_video: '' });
                                  setViewConteudo('edit_step_video');
                                  setAddingStepToSection(null);
                                }} className="w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center gap-2 text-slate-700"><PlayCircle className="w-4 h-4 text-slate-400"/> Vídeo</button>
                                <button onClick={() => {
-                                 setEditingStep({ nome: '', secaoId: section.id, tipo: 'multi_video', videos: [{title: '', url: ''}] });
+                                 const sid = section.id || `sec-${sIdx}`;
+                                 setEditingStep({ nome: '', secaoId: sid, tipo: 'multi_video', videos: [{title: '', url: ''}] });
                                  setViewConteudo('edit_step_multi_video');
                                  setAddingStepToSection(null);
                                }} className="w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center gap-2 text-slate-700"><List className="w-4 h-4 text-slate-400"/> Multi-vídeo</button>
                                <button onClick={() => {
-                                 setEditingStep({ nome: '', secaoId: section.id, tipo: 'ao_vivo', descricao: '', url_video: '', tempo_video: '' });
+                                 const sid = section.id || `sec-${sIdx}`;
+                                 setEditingStep({ nome: '', secaoId: sid, tipo: 'ao_vivo', descricao: '', url_video: '', tempo_video: '' });
                                  setViewConteudo('edit_step_ao_vivo');
                                  setAddingStepToSection(null);
                                }} className="w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center gap-2 text-slate-700"><VideoIcon className="w-4 h-4 text-slate-400"/> Ao Vivo</button>
                                <button onClick={() => {
-                                 setEditingStep({ nome: '', secaoId: section.id, tipo: 'quiz', questoes_ids: [] });
+                                 const sid = section.id || `sec-${sIdx}`;
+                                 setEditingStep({ nome: '', secaoId: sid, tipo: 'quiz', questoes_ids: [] });
                                  setViewConteudo('edit_step_quiz');
                                  setAddingStepToSection(null);
                                }} className="w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center gap-2 text-slate-700"><CheckCircle className="w-4 h-4 text-slate-400"/> Quiz</button>

@@ -3553,6 +3553,15 @@ export default function App() {
                   <ClipboardSignature className="w-4 h-4" /> Avaliação
                 </button>
               )}
+              {(isUserAdmin(loggedUser) || (loggedRole === 'avaliador' || loggedRole === 'coordenador')) && loggedRole !== 'avaliador_convidado' && (
+                <button 
+                  onClick={() => { setMainTab('cursos'); setCurrentView('cursos'); }}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${mainTab === 'cursos' ? 'bg-white shadow-sm' : 'text-white/80 hover:bg-white/10'}`}
+                  style={mainTab === 'cursos' ? { color: orgSettings?.cor_primaria || '#b91c1c' } : {}}
+                >
+                  <BookOpen className="w-4 h-4" /> Curso
+                </button>
+              )}
               {isUserAdmin(loggedUser) && (
                 <button 
                   onClick={() => { setMainTab('configuracao'); if (currentView === 'avaliacao') setCurrentView('candidatos'); }}
@@ -3569,15 +3578,6 @@ export default function App() {
                   style={mainTab === 'resultados' ? { color: orgSettings?.cor_primaria || '#b91c1c' } : {}}
                 >
                   <FileText className="w-4 h-4" /> Resultados
-                </button>
-              )}
-              {(isUserAdmin(loggedUser) || (loggedRole === 'avaliador' || loggedRole === 'coordenador')) && loggedRole !== 'avaliador_convidado' && (
-                <button 
-                  onClick={() => { setMainTab('cursos'); setCurrentView('cursos'); }}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${mainTab === 'cursos' ? 'bg-white shadow-sm' : 'text-white/80 hover:bg-white/10'}`}
-                  style={mainTab === 'cursos' ? { color: orgSettings?.cor_primaria || '#b91c1c' } : {}}
-                >
-                  <BookOpen className="w-4 h-4" /> Cursos
                 </button>
               )}
               {isUserAdmin(loggedUser) && (
