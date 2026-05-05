@@ -25,6 +25,12 @@ export function TreinamentoCapacitacao({ loggedUser, loggedRole }: TreinamentoCa
   const isAdmin = loggedRole === 'admin' || (loggedRole === 'avaliador' && ('funcao' in loggedUser) && (loggedUser.funcao === 'gestor' || loggedUser.funcao === 'coordenador'));
 
   useEffect(() => {
+    // Guard against unconfigured Supabase
+    if (!import.meta.env.VITE_SUPABASE_URL || import.meta.env.VITE_SUPABASE_URL === 'https://placeholder.supabase.co') {
+      setIsLoading(false);
+      return;
+    }
+
     fetchTreinamentos();
 
     // Subscribe to real-time updates for all treinamentos

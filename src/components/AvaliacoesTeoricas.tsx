@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { FileText, Plus, Trash2, Upload, Download, AlertCircle } from 'lucide-react';
+import { ActionModal } from './ActionModal';
 
 interface AvaliacoesTeoricasProps {
   loggedUser: any;
@@ -19,6 +20,12 @@ export function AvaliacoesTeoricas({ loggedUser }: AvaliacoesTeoricasProps) {
   const [grauPretendido, setGrauPretendido] = useState('Shodan (1º Dan)');
   const [modulo, setModulo] = useState('');
   const [media, setMedia] = useState('');
+  const [modalConfig, setModalConfig] = useState<{isOpen: boolean, title: string, message: string, onConfirm: () => void}>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {}
+  });
 
   useEffect(() => {
     fetchData();
@@ -82,17 +89,23 @@ export function AvaliacoesTeoricas({ loggedUser }: AvaliacoesTeoricasProps) {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm('Tem certeza que deseja excluir esta avaliação?')) return;
-
-    try {
-      const { error } = await supabase.from('avaliacoes_teoricas').delete().eq('id', id);
-      if (error) throw error;
-      setAvaliacoes(avaliacoes.filter(a => a.id !== id));
-    } catch (err: any) {
-      console.error('Erro ao excluir:', err);
-      alert('Erro ao excluir a avaliação.');
-    }
+  const handleDelete = (id: string) => {
+    setModalConfig({
+      isOpen: true,
+      title: 'Excluir Avaliação',
+      message: 'Tem certeza que deseja excluir esta avaliação?',
+      onConfirm: async () => {
+        setModalConfig(prev => ({ ...prev, isOpen: false }));
+        try {
+          const { error } = await supabase.from('avaliacoes_teoricas').delete().eq('id', id);
+          if (error) throw error;
+          setAvaliacoes(avaliacoes.filter(a => a.id !== id));
+        } catch (err: any) {
+          console.error('Erro ao excluir:', err);
+          alert('Erro ao excluir a avaliação.');
+        }
+      }
+    });
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -385,6 +398,15 @@ export function AvaliacoesTeoricas({ loggedUser }: AvaliacoesTeoricasProps) {
           </tbody>
         </table>
       </div>
+
+      <ActionModal
+        isOpen={modalConfig.isOpen}
+        title={modalConfig.title}
+        message={modalConfig.message}
+        type="confirm"
+        onConfirm={modalConfig.onConfirm}
+        onCancel={() => setModalConfig(prev => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 }

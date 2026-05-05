@@ -1,6 +1,10 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { CheckSquare, FileText, LogOut, TrendingUp, Award, Calendar, ChevronRight, Loader2 } from 'lucide-react';
+import { CheckSquare, FileText, LogOut, TrendingUp, Award, Calendar, ChevronRight, Loader2, BookOpen, User, PlayCircle, Download } from 'lucide-react';
+import { CertificateTemplate } from './CertificateDesigner';
 import { RealizarProva } from './RealizarProva';
+import { CurriculoCandidato } from './CurriculoCandidato';
+import { CensoPerfil } from './CensoPerfil';
+import { CursosCandidato } from './CursosCandidato';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
 import { supabase } from '../lib/supabase';
 
@@ -11,10 +15,16 @@ interface CandidatoDashboardProps {
   aggregatedResultados: any[];
   modulos: any[];
   orgSettings?: { nome: string, logo_url: string | null, cor_primaria: string } | null;
+  onDownloadCertificate?: (modulo: any, participante: any) => void;
 }
 
-export function CandidatoDashboard({ candidato, onLogout, resultados, aggregatedResultados, modulos, orgSettings }: CandidatoDashboardProps) {
-  const [activeTab, setActiveTab] = useState<'provas' | 'resultados'>('provas');
+export function CandidatoDashboard({ candidato, onLogout, resultados, aggregatedResultados, modulos, orgSettings, onDownloadCertificate }: CandidatoDashboardProps) {
+  // Para ouvintes, a aba inicial depende do tipo de inscrição
+  const initialTab = candidato.role === 'ouvinte' 
+    ? (candidato.tipo_inscricao === 'curso' ? 'cursos' : 'resultados')
+    : 'perfil';
+    
+  const [activeTab, setActiveTab] = useState<'provas' | 'resultados' | 'curriculo' | 'perfil' | 'cursos'>(initialTab);
   const [selectedEval, setSelectedEval] = useState<any | null>(null);
   const [detailedData, setDetailedData] = useState<{waza: any[], kata: any[], kihon: any[]}>({ waza: [], kata: [], kihon: [] });
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
@@ -191,12 +201,22 @@ export function CandidatoDashboard({ candidato, onLogout, resultados, aggregated
                 {new Date(selectedEval.created_at).toLocaleDateString('pt-BR')}
               </p>
             </div>
-            <div className={`px-4 py-2 rounded-lg font-bold text-lg ${
-              selectedEval.veredito === 'Aprovado' ? 'bg-emerald-100 text-emerald-800' :
-              selectedEval.veredito === 'Reprovado' ? 'bg-red-100 text-red-800' :
-              'bg-amber-100 text-amber-800'
-            }`}>
-              {selectedEval.veredito}
+            <div className="flex items-center gap-3">
+              {selectedEval.veredito === 'Aprovado' && modulo?.certificado_template && onDownloadCertificate && (
+                <button 
+                  onClick={() => onDownloadCertificate(modulo, candidato)}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm font-medium"
+                >
+                  <Download className="w-4 h-4" /> Baixar Certificado
+                </button>
+              )}
+              <div className={`px-4 py-2 rounded-lg font-bold text-lg ${
+                selectedEval.veredito === 'Aprovado' ? 'bg-emerald-100 text-emerald-800' :
+                selectedEval.veredito === 'Reprovado' ? 'bg-red-100 text-red-800' :
+                'bg-amber-100 text-amber-800'
+              }`}>
+                {selectedEval.veredito}
+              </div>
             </div>
           </div>
 
@@ -235,7 +255,7 @@ export function CandidatoDashboard({ candidato, onLogout, resultados, aggregated
                   <h3 className="text-lg font-bold text-slate-800 border-b pb-2 mb-6">Desempenho por Técnica</h3>
                   <div className="h-80 w-full">
                     <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={techniqueScores} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
+                      <BarChart data={techniqueScores as any[]} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                         <XAxis 
                           dataKey="name" 
@@ -281,7 +301,7 @@ export function CandidatoDashboard({ candidato, onLogout, resultados, aggregated
                       {uniqueStudySuggestions.map((sugestao, idx) => (
                         <li key={idx} className="text-sm text-slate-700 whitespace-pre-wrap flex items-start gap-2">
                           {uniqueStudySuggestions.length > 1 && <span className="text-blue-500 font-bold mt-0.5">&bull;</span>}
-                          <span>{sugestao}</span>
+                          <span>{String(sugestao)}</span>
                         </li>
                       ))}
                     </ul>
@@ -444,6 +464,18 @@ export function CandidatoDashboard({ candidato, onLogout, resultados, aggregated
                     </div>
                     
                     <div className="flex items-center justify-between sm:justify-end gap-6 w-full sm:w-auto mt-2 sm:mt-0 pl-16 sm:pl-0">
+                      {res.veredito === 'Aprovado' && modulo?.certificado_template && onDownloadCertificate && (
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDownloadCertificate(modulo, candidato);
+                          }}
+                          className="flex items-center gap-2 p-2 bg-blue-50 text-blue-700 rounded-md hover:bg-blue-100 transition-colors"
+                          title="Baixar Certificado"
+                        >
+                          <Download className="w-4 h-4" />
+                        </button>
+                      )}
                       <div className="text-center">
                         <div className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-0.5">Nota</div>
                         <div className="font-black text-lg text-slate-800">{score !== null && score !== undefined ? `${score}%` : '-'}</div>
@@ -483,7 +515,7 @@ export function CandidatoDashboard({ candidato, onLogout, resultados, aggregated
             )}
             <div>
               <h1 className="text-2xl font-black tracking-tight">
-                {orgSettings?.nome ? `Portal ${orgSettings.nome}` : 'Portal do'} <span className="text-red-200 font-normal">Candidato</span>
+                {orgSettings?.nome ? `${orgSettings.nome}` : 'Dojo Evolution'} <span className="text-red-200 font-normal">{candidato.role === 'ouvinte' ? 'Ouvinte' : 'Candidato'}</span>
               </h1>
               <p className="text-red-100 text-sm">Olá, {candidato.nome}</p>
             </div>
@@ -492,18 +524,46 @@ export function CandidatoDashboard({ candidato, onLogout, resultados, aggregated
           <div className="flex flex-col md:flex-row items-center gap-4">
             {/* Main Navigation Tabs */}
             <div className="flex flex-wrap justify-center bg-red-800 rounded-lg p-1">
-              <button 
-                onClick={() => { setActiveTab('provas'); setSelectedEval(null); }}
-                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'provas' ? 'bg-white text-red-700 shadow-sm' : 'text-red-100 hover:bg-red-700'}`}
-              >
-                <CheckSquare className="w-4 h-4" /> Minhas Provas
-              </button>
-              <button 
-                onClick={() => setActiveTab('resultados')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'resultados' ? 'bg-white text-red-700 shadow-sm' : 'text-red-100 hover:bg-red-700'}`}
-              >
-                <FileText className="w-4 h-4" /> Meus Resultados
-              </button>
+              {candidato.role !== 'ouvinte' && (
+                <button 
+                  onClick={() => { setActiveTab('perfil'); setSelectedEval(null); }}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'perfil' ? 'bg-white text-red-700 shadow-sm' : 'text-red-100 hover:bg-red-700'}`}
+                >
+                  <User className="w-4 h-4" /> Perfil
+                </button>
+              )}
+              {candidato.role !== 'ouvinte' && (
+                <button 
+                  onClick={() => { setActiveTab('curriculo'); setSelectedEval(null); }}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'curriculo' ? 'bg-white text-red-700 shadow-sm' : 'text-red-100 hover:bg-red-700'}`}
+                >
+                  <BookOpen className="w-4 h-4" /> Currículo
+                </button>
+              )}
+              {candidato.role !== 'ouvinte' && (
+                <button 
+                  onClick={() => { setActiveTab('provas'); setSelectedEval(null); }}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'provas' ? 'bg-white text-red-700 shadow-sm' : 'text-red-100 hover:bg-red-700'}`}
+                >
+                  <CheckSquare className="w-4 h-4" /> Minhas Provas
+                </button>
+              )}
+              {(candidato.role !== 'ouvinte' || candidato.tipo_inscricao === 'modulo') && (
+                <button 
+                  onClick={() => setActiveTab('resultados')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'resultados' ? 'bg-white text-red-700 shadow-sm' : 'text-red-100 hover:bg-red-700'}`}
+                >
+                  <FileText className="w-4 h-4" /> Meus Resultados
+                </button>
+              )}
+              {(candidato.role !== 'ouvinte' || candidato.tipo_inscricao === 'curso') && (
+                <button 
+                  onClick={() => setActiveTab('cursos')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'cursos' ? 'bg-white text-red-700 shadow-sm' : 'text-red-100 hover:bg-red-700'}`}
+                >
+                  <PlayCircle className="w-4 h-4" /> Cursos
+                </button>
+              )}
             </div>
 
             <button 
@@ -518,12 +578,24 @@ export function CandidatoDashboard({ candidato, onLogout, resultados, aggregated
       </header>
 
       <main className="max-w-5xl mx-auto mt-8 px-4">
+        {activeTab === 'perfil' && (
+          <CensoPerfil candidato={candidato} />
+        )}
+
+        {activeTab === 'curriculo' && (
+          <CurriculoCandidato candidato={candidato} />
+        )}
+        
         {activeTab === 'provas' && (
           <RealizarProva candidatoId={candidato.reference_id || candidato.id} loggedUser={candidato} />
         )}
         
         {activeTab === 'resultados' && (
           renderResultados()
+        )}
+        
+        {activeTab === 'cursos' && (
+          <CursosCandidato userRole={candidato.role} />
         )}
       </main>
     </div>

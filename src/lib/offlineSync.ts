@@ -22,7 +22,11 @@ export const addToSyncQueue = (task: Omit<SyncTask, 'id' | 'timestamp'>) => {
     timestamp: Date.now()
   };
   queue.push(newTask);
-  localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(queue));
+  try {
+    localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(queue));
+  } catch (e) {
+    console.warn("Erro ao salvar fila de sincronização em localStorage:", e);
+  }
   
   // Dispatch event to update UI
   window.dispatchEvent(new CustomEvent('sync-queue-updated', { detail: queue }));
@@ -31,7 +35,11 @@ export const addToSyncQueue = (task: Omit<SyncTask, 'id' | 'timestamp'>) => {
 export const removeFromSyncQueue = (id: string) => {
   const queue = getSyncQueue();
   const newQueue = queue.filter(t => t.id !== id);
-  localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(newQueue));
+  try {
+    localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(newQueue));
+  } catch (e) {
+    console.warn("Erro ao atualizar fila de sincronização em localStorage:", e);
+  }
   
   // Dispatch event to update UI
   window.dispatchEvent(new CustomEvent('sync-queue-updated', { detail: newQueue }));

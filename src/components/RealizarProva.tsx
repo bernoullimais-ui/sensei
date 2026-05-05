@@ -61,7 +61,7 @@ export function RealizarProva({ candidatoId, loggedUser }: RealizarProvaProps) {
           draft.questaoAtualIndex = questaoAtualIndex;
           localStorage.setItem(draftKey, JSON.stringify(draft));
         } catch (e) {
-          console.error("Erro ao salvar rascunho", e);
+          console.warn("Erro ao salvar rascunho em localStorage:", e);
         }
       }
     }
@@ -172,11 +172,15 @@ export function RealizarProva({ candidatoId, loggedUser }: RealizarProvaProps) {
         }
       }
 
-      localStorage.setItem(draftKey, JSON.stringify({
-        respostas: restoredRespostas,
-        questaoAtualIndex: restoredIndex,
-        endTime
-      }));
+      try {
+        localStorage.setItem(draftKey, JSON.stringify({
+          respostas: restoredRespostas,
+          questaoAtualIndex: restoredIndex,
+          endTime
+        }));
+      } catch (e) {
+        console.warn("Erro ao salvar estado inicial da prova em localStorage:", e);
+      }
 
       setQuestoesProva(questoesOrdenadas);
       setProvaAtiva(prova);

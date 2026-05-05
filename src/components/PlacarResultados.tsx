@@ -61,9 +61,10 @@ export function PlacarResultados({ moduloId }: PlacarProps) {
           .select('*')
           .eq('modulo_id', moduloId)
           .order('created_at', { ascending: false })
-          .then(({ data }) => {
-            if (data) setResultados(data);
-          });
+          .then(
+            ({ data }) => { if (data) setResultados(data); },
+            err => console.error(err)
+          );
       })
       .subscribe();
 

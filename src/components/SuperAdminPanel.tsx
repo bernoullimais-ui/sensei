@@ -131,7 +131,7 @@ export function SuperAdminPanel() {
     <div className="p-6 max-w-7xl mx-auto">
       <div className="mb-8">
         <h1 className="text-3xl font-black text-slate-900 tracking-tight">Painel Super-Admin</h1>
-        <p className="text-slate-500 mt-1">Gestão global da plataforma Sensei Assistente Digital</p>
+        <p className="text-slate-500 mt-1">Gestão global da plataforma Dojo Evolution</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">

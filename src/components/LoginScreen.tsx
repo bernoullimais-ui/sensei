@@ -91,7 +91,7 @@ export function LoginScreen({ onLogin, onCheckZempo, onFirstAccess, onOnboarding
             <img src="/judo_tech_icon.png" alt="Logo" className="w-[160px] h-[160px] object-contain brightness-0 invert drop-shadow-2xl" />
             <div className="text-center">
               <h1 className="text-4xl font-black tracking-tight drop-shadow-md">
-                Sensei Assistente <span className="text-red-200 font-normal">Digital</span>
+                Dojo <span className="text-red-200 font-normal">Evolution</span>
               </h1>
               <p className="text-red-100 text-lg mt-1 drop-shadow-md">A evolução natural do seu dojo</p>
             </div>
@@ -120,11 +120,8 @@ export function LoginScreen({ onLogin, onCheckZempo, onFirstAccess, onOnboarding
           <div className="flex flex-col items-center mb-6 lg:mb-10 mt-4 lg:mt-0 lg:hidden">
             <img src="/judo_tech_icon.png" alt="Logo" className="w-[80px] h-[80px] lg:w-[120px] lg:h-[120px] object-contain mb-2 lg:mb-4" />
             <h1 className="text-2xl lg:text-3xl font-black tracking-tight text-slate-900 text-center">
-              Sensei Assistente
+              Dojo Evolution
             </h1>
-            <h2 className="text-xl lg:text-2xl font-normal text-red-700 text-center mb-1 lg:mb-2">
-              Digital
-            </h2>
             <p className="text-slate-500 text-xs lg:text-sm text-center">A evolução natural do seu dojo</p>
           </div>
 
@@ -392,7 +389,7 @@ export function LoginScreen({ onLogin, onCheckZempo, onFirstAccess, onOnboarding
                   <CheckCircle2 className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
                   <div>
                     <h3 className="font-semibold text-green-800">ZEMPO Encontrado!</h3>
-                    <p className="text-sm text-green-700 mt-1">Olá, <strong>{userData.nome}</strong>. Para concluir a ativação da sua conta de {userRole === 'avaliador' ? 'Avaliador' : 'Candidato'}, preencha os dados abaixo.</p>
+                    <p className="text-sm text-green-700 mt-1">Olá, <strong>{userData.nome}</strong>. Para concluir a ativação da sua conta de {(userRole === 'avaliador' || userRole === 'avaliador_convidado') ? 'Avaliador' : 'Candidato'}, preencha os dados abaixo.</p>
                   </div>
                 </div>
               </div>
@@ -473,14 +470,14 @@ export function LoginScreen({ onLogin, onCheckZempo, onFirstAccess, onOnboarding
           )}
 
           <div className="mt-6 lg:mt-8 text-center text-xs lg:text-sm text-slate-500">
-            <p>Problemas para acessar? Entre em contato através do portal judotech.com.br</p>
+            <p>Problemas para acessar? Entre em contato através do portal dojoone.com.br</p>
           </div>
         </div>
         
         {/* Footer */}
         <div className="mt-8 lg:mt-auto pt-4 pb-4 lg:pb-0 flex flex-col items-center justify-center text-center">
           <div className="flex items-center gap-1.5 text-slate-600 font-medium text-sm lg:text-base">
-            Desenvolvido por <span className="font-black text-slate-900">Judô<span className="text-red-600">Tech</span></span>
+            Desenvolvido por <span className="font-black text-slate-900">Dojo<span className="text-red-600"> One</span></span>
           </div>
           <p className="text-slate-500 text-[10px] lg:text-xs mt-1">Tradição no tatame, inovação na gestão.</p>
         </div>

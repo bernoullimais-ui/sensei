@@ -1,5 +1,17 @@
--- Atualização da tabela treinamento_participantes para incluir novas colunas
--- Adicionar colunas de senha às tabelas principais
+-- Adicionar coluna de template de certificado às tabelas principais
+ALTER TABLE modulos_avaliacao ADD COLUMN IF NOT EXISTS certificado_template JSONB DEFAULT NULL;
+ALTER TABLE cursos ADD COLUMN IF NOT EXISTS certificado_template JSONB DEFAULT NULL;
+
+-- Habilitar RLS (exemplo genérico, ajuste conforme necessário)
+ALTER TABLE modulos_avaliacao ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Permitir tudo para todos" ON modulos_avaliacao;
+CREATE POLICY "Permitir tudo para todos" ON modulos_avaliacao FOR ALL USING (true) WITH CHECK (true);
+
+ALTER TABLE cursos ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Permitir tudo para todos" ON cursos;
+CREATE POLICY "Permitir tudo para todos" ON cursos FOR ALL USING (true) WITH CHECK (true);
+
+-- Outros ajustes
 ALTER TABLE avaliadores ADD COLUMN IF NOT EXISTS senha TEXT;
 ALTER TABLE candidatos ADD COLUMN IF NOT EXISTS senha TEXT;
 

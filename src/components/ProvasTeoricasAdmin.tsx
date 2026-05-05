@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { Plus, Trash2, Calendar, Clock, AlertCircle, CheckSquare, FileText, Edit } from 'lucide-react';
+import { ActionModal } from './ActionModal';
 
 interface ProvasTeoricasAdminProps {
   loggedUser: any;
@@ -24,12 +25,20 @@ export function ProvasTeoricasAdmin({ loggedUser }: ProvasTeoricasAdminProps) {
   const [selectedQuestoes, setSelectedQuestoes] = useState<Set<string>>(new Set());
 
   // Modal states
-  const [modalOpen, setModalOpen] = useState(false);
-  const [modalMessage, setModalMessage] = useState('');
-  const [modalAction, setModalAction] = useState<((value?: string) => void) | null>(null);
-  const [isAlert, setIsAlert] = useState(false);
-  const [isPrompt, setIsPrompt] = useState(false);
-  const [modalInputValue, setModalInputValue] = useState('');
+  const [modalConfig, setModalConfig] = useState<{
+    isOpen: boolean;
+    type: 'alert' | 'confirm' | 'prompt';
+    title: string;
+    message: string;
+    inputLabel?: string;
+    onConfirm: (val?: any) => void;
+  }>({
+    isOpen: false,
+    type: 'alert',
+    title: '',
+    message: '',
+    onConfirm: () => {}
+  });
 
   useEffect(() => {
     fetchData();
@@ -171,21 +180,29 @@ export function ProvasTeoricasAdmin({ loggedUser }: ProvasTeoricasAdminProps) {
   };
 
   const handleDelete = async (id: string) => {
-    setModalMessage('Tem certeza que deseja excluir esta prova? As respostas dos candidatos também serão perdidas.');
-    setIsAlert(false);
-    setModalAction(() => async () => {
-      try {
-        const { error } = await supabase.from('provas_teoricas').delete().eq('id', id);
-        if (error) throw error;
-        setProvas(provas.filter(p => p.id !== id));
-      } catch (err: any) {
-        console.error('Erro ao excluir:', err);
-        setModalMessage('Erro ao excluir a prova.');
-        setIsAlert(true);
-        setModalOpen(true);
+    setModalConfig({
+      isOpen: true,
+      type: 'confirm',
+      title: 'Excluir Prova',
+      message: 'Tem certeza que deseja excluir esta prova? As respostas dos candidatos também serão perdidas.',
+      onConfirm: async () => {
+        setModalConfig(prev => ({ ...prev, isOpen: false }));
+        try {
+          const { error } = await supabase.from('provas_teoricas').delete().eq('id', id);
+          if (error) throw error;
+          setProvas(provas.filter(p => p.id !== id));
+        } catch (err: any) {
+          console.error('Erro ao excluir:', err);
+          setModalConfig({
+            isOpen: true,
+            type: 'alert',
+            title: 'Erro',
+            message: 'Erro ao excluir a prova.',
+            onConfirm: () => setModalConfig(prev => ({ ...prev, isOpen: false }))
+          });
+        }
       }
     });
-    setModalOpen(true);
   };
 
   const toggleQuestao = (id: string) => {
@@ -199,29 +216,32 @@ export function ProvasTeoricasAdmin({ loggedUser }: ProvasTeoricasAdminProps) {
   };
 
   const handleSortearQuestoes = () => {
-    setModalMessage(`Quantas questões você deseja sortear? (Máximo: ${questoes.length})`);
-    setIsAlert(false);
-    setIsPrompt(true);
-    setModalInputValue('');
-    setModalAction(() => (value?: string) => {
-      const qtd = parseInt(value || '');
-      if (isNaN(qtd) || qtd <= 0) {
-        setTimeout(() => {
-          setModalMessage('Quantidade inválida.');
-          setIsAlert(true);
-          setIsPrompt(false);
-          setModalOpen(true);
-        }, 100);
-        return;
+    setModalConfig({
+      isOpen: true,
+      type: 'prompt',
+      title: 'Sortear Questões',
+      message: `Quantas questões você deseja sortear? (Máximo: ${questoes.length})`,
+      onConfirm: (value: string) => {
+        const qtd = parseInt(value || '');
+        if (isNaN(qtd) || qtd <= 0) {
+          setModalConfig({
+            isOpen: true,
+            type: 'alert',
+            title: 'Erro',
+            message: 'Quantidade inválida.',
+            onConfirm: () => setModalConfig(prev => ({ ...prev, isOpen: false }))
+          });
+          return;
+        }
+        
+        setModalConfig(prev => ({ ...prev, isOpen: false }));
+        const maxQtd = Math.min(qtd, questoes.length);
+        const shuffled = [...questoes].sort(() => 0.5 - Math.random());
+        const selected = shuffled.slice(0, maxQtd).map(q => q.id);
+        
+        setSelectedQuestoes(new Set(selected));
       }
-      
-      const maxQtd = Math.min(qtd, questoes.length);
-      const shuffled = [...questoes].sort(() => 0.5 - Math.random());
-      const selected = shuffled.slice(0, maxQtd).map(q => q.id);
-      
-      setSelectedQuestoes(new Set(selected));
     });
-    setModalOpen(true);
   };
 
   return (
@@ -421,63 +441,14 @@ export function ProvasTeoricasAdmin({ loggedUser }: ProvasTeoricasAdminProps) {
       )}
 
       {/* Modal */}
-      {modalOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 animate-in fade-in">
-          <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6 animate-in zoom-in-95">
-            <h3 className="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <AlertCircle className={`w-6 h-6 ${isAlert ? 'text-red-500' : 'text-blue-500'}`} />
-              {isAlert ? 'Atenção' : 'Confirmação'}
-            </h3>
-            <p className="text-slate-600 mb-4">{modalMessage}</p>
-            
-            {isPrompt && (
-              <input
-                type="number"
-                min="1"
-                max={questoes.length}
-                value={modalInputValue}
-                onChange={(e) => setModalInputValue(e.target.value)}
-                className="w-full p-2 border border-slate-300 rounded-md mb-6 outline-none focus:ring-2 focus:ring-red-500"
-                placeholder="Ex: 10"
-                autoFocus
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    setModalOpen(false);
-                    setIsPrompt(false);
-                    if (modalAction) modalAction(modalInputValue);
-                  }
-                }}
-              />
-            )}
-
-            <div className="flex justify-end gap-3 mt-2">
-              {!isAlert && (
-                <button
-                  onClick={() => {
-                    setModalOpen(false);
-                    setIsPrompt(false);
-                  }}
-                  className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-md font-medium transition-colors"
-                >
-                  Cancelar
-                </button>
-              )}
-              <button
-                onClick={() => {
-                  setModalOpen(false);
-                  setIsPrompt(false);
-                  if (modalAction) modalAction(modalInputValue);
-                }}
-                className={`px-4 py-2 text-white rounded-md font-medium transition-colors ${
-                  isAlert ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'
-                }`}
-              >
-                OK
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ActionModal
+        isOpen={modalConfig.isOpen}
+        title={modalConfig.title}
+        message={modalConfig.message}
+        type={modalConfig.type}
+        onConfirm={modalConfig.onConfirm}
+        onCancel={() => setModalConfig(prev => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 }
