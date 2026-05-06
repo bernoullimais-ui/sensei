@@ -811,9 +811,9 @@ export function CursosCandidato({ previewCourseId, isGestor, userRole: initialUs
     const isLastStep = selectedLesson && selectedLesson.secaoIdx === lastSecaoIdx && selectedLesson.etapaIdx === lastEtapaIdx;
 
     return (
-      <div className={isGestor ? 'h-full w-full flex overflow-hidden bg-white' : '-mx-4 md:-mx-8 -my-6 bg-white min-h-[calc(100vh-64px)] flex overflow-hidden'}>
+      <div className={isGestor ? 'h-full w-full flex overflow-hidden bg-white' : '-mx-4 md:-mx-8 -my-6 bg-white min-h-[calc(100vh-64px)] flex overflow-hidden relative'}>
         {/* Sidebar */}
-        <div className={`w-full md:w-80 bg-white border-r border-slate-200 flex-shrink-0 flex flex-col ${isSidebarOpen ? 'block' : 'hidden md:block'}`}>
+        <div className={`w-full md:w-80 bg-white border-r border-slate-200 flex-shrink-0 flex flex-col transition-all duration-300 ${selectedLesson ? 'hidden md:flex' : 'flex'}`}>
           <div className="p-4 border-b border-slate-200">
             {!previewCourseId && (
               <button 
@@ -910,11 +910,20 @@ export function CursosCandidato({ previewCourseId, isGestor, userRole: initialUs
         </div>
 
         {/* Content Area */}
-        <div className="flex-1 bg-white flex flex-col relative h-[calc(100vh-64px)] overflow-hidden">
+        <div className={`flex-1 bg-white flex flex-col relative h-[calc(100vh-64px)] overflow-hidden ${!selectedLesson ? 'hidden md:flex' : 'flex'}`}>
           <div className="flex-1 overflow-y-auto">
             {selectedLesson ? (
               <div>
                 <div className="p-6 md:p-10 max-w-5xl mx-auto">
+                  {/* Mobile Back Button */}
+                  <button 
+                    onClick={() => setSelectedLesson(null)}
+                    className="flex md:hidden items-center gap-2 text-blue-600 font-bold mb-6"
+                  >
+                    <ChevronLeft className="w-5 h-5" />
+                    Voltar para a lista
+                  </button>
+
                   <h1 className="text-2xl md:text-4xl font-bold text-slate-900 mb-8">{selectedLesson.nome}</h1>
                   
                   {selectedLesson.tipo === 'video' && selectedLesson.url_video && (
@@ -1279,6 +1288,15 @@ export function CursosCandidato({ previewCourseId, isGestor, userRole: initialUs
               </div>
             ) : (
               <div className="p-6 md:p-10 max-w-5xl mx-auto">
+                {/* Mobile Back Button for Overview */}
+                <button 
+                  onClick={() => setView('list')}
+                  className="flex md:hidden items-center gap-2 text-blue-600 font-bold mb-6"
+                >
+                  <ChevronLeft className="w-5 h-5" />
+                  Voltar para cursos
+                </button>
+
                 <div className="flex flex-col gap-8 mb-10">
                   <div className="w-full aspect-video bg-slate-100 rounded-2xl border border-slate-200 bg-cover bg-center shadow-lg overflow-hidden flex items-center justify-center" style={{ backgroundImage: selectedCurso.thumbnail_url ? `url("${selectedCurso.thumbnail_url}")` : undefined }}>
                     {!selectedCurso.thumbnail_url && (

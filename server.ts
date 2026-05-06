@@ -20,6 +20,19 @@ async function startServer() {
 
   app.use(express.json());
 
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok" });
+  });
+
+  app.get("/api/diag", (req, res) => {
+    res.json({
+      url_set: !!process.env.VITE_SUPABASE_URL,
+      key_set: !!process.env.VITE_SUPABASE_ANON_KEY,
+      node_version: process.version,
+      vite_vars: Object.keys(process.env).filter(k => k.startsWith('VITE_'))
+    });
+  });
+
   // API: Criar Pedido Pagar.me
   app.post("/api/pagarme/create-order", async (req, res) => {
     try {

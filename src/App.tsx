@@ -1490,13 +1490,23 @@ export default function App() {
     setLoginError('');
 
     try {
+      // Validate Supabase initialization
+      if (!supabase || !supabase.auth) {
+         throw new Error("Supabase não foi inicializado corretamente.");
+      }
+
+      console.log('Tentando login para:', cleanEmail);
+      
       // Using static import
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: cleanEmail,
         password: cleanSenha,
       });
 
-      if (authError) throw authError;
+      if (authError) {
+        console.error('Supabase Auth Error:', authError);
+        throw authError;
+      }
 
       // Fetch user profile
       const { data: { user } } = await supabase.auth.getUser();
