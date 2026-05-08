@@ -78,14 +78,15 @@ export function CurriculoCandidato({ candidato, tableName = 'candidatos', onShow
     if (candidato?.id) {
       const currentGrad = candidato.graduacao || candidato.grau_atual;
       const nextDan = getNextDan(currentGrad);
+      const grauPretendidoCandidato = candidato.grau_pretendido || candidato.graduacao_pretendida;
       
       // Automatically set the intended degree to the next one if it hasn't been specifically saved yet
       // or if it's the default "1º Dan" and we know a better one.
-      if (!data.grauPretendido || (data.grauPretendido === '1º Dan' && nextDan !== '1º Dan')) {
-        setData(prev => ({ ...prev, grauPretendido: nextDan }));
+      if (!data.grauPretendido || (data.grauPretendido === '1º Dan' && (grauPretendidoCandidato || nextDan) !== '1º Dan')) {
+        setData(prev => ({ ...prev, grauPretendido: grauPretendidoCandidato || nextDan }));
       }
     }
-  }, [candidato?.graduacao, candidato?.grau_atual, candidato?.id]);
+  }, [candidato?.graduacao, candidato?.grau_atual, candidato?.grau_pretendido, candidato?.graduacao_pretendida, candidato?.id]);
 
   // Auto-calculate anoExame based on dataUltimaAvaliacao and carencia
   useEffect(() => {
@@ -125,7 +126,7 @@ export function CurriculoCandidato({ candidato, tableName = 'candidatos', onShow
         // Enrichment if not set in JSON
         if (!finalGrauPretendido) {
            const currentGrad = candidato?.graduacao || candidato?.grau_atual;
-           finalGrauPretendido = getNextDan(currentGrad || '');
+           finalGrauPretendido = candidato?.grau_pretendido || candidato?.graduacao_pretendida || getNextDan(currentGrad || '');
         }
 
         setData((prev: any) => ({
@@ -139,7 +140,7 @@ export function CurriculoCandidato({ candidato, tableName = 'candidatos', onShow
       } else {
         // Defaults for first time
         const currentGrad = candidato?.graduacao || candidato?.grau_atual;
-        const defaultGrau = getNextDan(currentGrad || '');
+        const defaultGrau = candidato?.grau_pretendido || candidato?.graduacao_pretendida || getNextDan(currentGrad || '');
 
         setData(prev => ({
           ...prev,

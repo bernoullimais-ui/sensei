@@ -97,6 +97,7 @@ interface KataDef {
 interface Candidato {
   id: string;
   nome: string;
+  grau_atual?: string;
   grau_pretendido: Dan;
   dojo: string;
   zempo: string;
