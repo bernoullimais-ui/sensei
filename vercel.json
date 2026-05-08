@@ -1,0 +1,6 @@
+{
+  "rewrites": [
+    { "src": "/api/(.*)", "dest": "/server.ts" },
+    { "src": "/(.*)", "dest": "/index.html" }
+  ]
+}
