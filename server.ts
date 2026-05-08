@@ -17,247 +17,233 @@ const supabase = createClient(
 const app = express();
 const PORT = 3000;
 
-async function startServer() {
-  app.use(express.json());
+app.use(express.json());
 
-  app.get("/api/health", (req, res) => {
-    res.json({ status: "ok" });
+// Synchronous API Routes
+app.get("/api/health", (req, res) => {
+  res.json({ status: "ok" });
+});
+
+app.get("/api/diag", (req, res) => {
+  res.json({
+    url_set: !!process.env.VITE_SUPABASE_URL,
+    key_set: !!process.env.VITE_SUPABASE_ANON_KEY,
+    node_version: process.version,
+    vite_vars: Object.keys(process.env).filter(k => k.startsWith('VITE_'))
   });
+});
 
-  app.get("/api/diag", (req, res) => {
-    res.json({
-      url_set: !!process.env.VITE_SUPABASE_URL,
-      key_set: !!process.env.VITE_SUPABASE_ANON_KEY,
-      node_version: process.version,
-      vite_vars: Object.keys(process.env).filter(k => k.startsWith('VITE_'))
+app.post("/api/pagarme/create-order", async (req, res) => {
+  try {
+    const { amount, customer, items, metadata } = req.body;
+    const secretKey = process.env.PAGARME_SECRET_KEY;
+
+    if (!secretKey) {
+      return res.status(500).json({ error: "Pagar.me secret key not configured" });
+    }
+
+    const authHeader = `Basic ${Buffer.from(secretKey + ":").toString("base64")}`;
+
+    const payload = {
+      items: items.map((item: any) => ({
+        amount: Math.max(100, Math.round(Number(item.amount))), 
+        description: String(item.description || "Inscrição").substring(0, 250),
+        quantity: 1,
+        code: String(item.code || "REGISTRO").substring(0, 50)
+      })),
+      customer: {
+        name: (customer.name || "Participante").substring(0, 64),
+        email: customer.email,
+        type: "individual",
+        document: String(customer.cpf || "").replace(/\D/g, '') || "00000000000",
+        document_type: "CPF",
+        phones: {
+          mobile_phone: {
+            country_code: "55",
+            area_code: "11",
+            number: "999999999"
+          }
+        }
+      },
+      payments: [
+        {
+          payment_method: "checkout",
+          checkout: {
+            expires_in: 120,
+            billing_address_editable: true,
+            customer_editable: true,
+            accepted_payment_methods: ["credit_card", "pix"],
+            pix: {
+              expires_in: 3600
+            },
+            success_url: metadata.success_url,
+            skip_checkout_success_page: false
+          }
+        }
+      ],
+      metadata: {
+        ...metadata,
+        server_version: "1.4"
+      }
+    };
+
+    const response = await fetch("https://api.pagar.me/core/v5/orders", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": authHeader
+      },
+      body: JSON.stringify(payload)
     });
-  });
 
-  // API: Criar Pedido Pagar.me
-  app.post("/api/pagarme/create-order", async (req, res) => {
-    try {
-      const { amount, customer, items, metadata } = req.body;
-      const secretKey = process.env.PAGARME_SECRET_KEY;
-
-      if (!secretKey) {
-        return res.status(500).json({ error: "Pagar.me secret key not configured" });
-      }
-
-      const authHeader = `Basic ${Buffer.from(secretKey + ":").toString("base64")}`;
-
-      // Payload para Pagar.me v5 - Build Robusta
-      const payload = {
-        items: items.map((item: any) => ({
-          amount: Math.max(100, Math.round(Number(item.amount))), 
-          description: String(item.description || "Inscrição").substring(0, 250),
-          quantity: 1,
-          code: String(item.code || "REGISTRO").substring(0, 50)
-        })),
-        customer: {
-          name: (customer.name || "Participante").substring(0, 64),
-          email: customer.email,
-          type: "individual",
-          document: String(customer.cpf || "").replace(/\D/g, '') || "00000000000",
-          document_type: "CPF",
-          phones: {
-            mobile_phone: {
-              country_code: "55",
-              area_code: "11",
-              number: "999999999"
-            }
-          }
-        },
-        payments: [
-          {
-            payment_method: "checkout",
-            checkout: {
-              expires_in: 120,
-              billing_address_editable: true,
-              customer_editable: true,
-              accepted_payment_methods: ["credit_card", "pix"],
-              pix: {
-                expires_in: 3600
-              },
-              success_url: metadata.success_url,
-              skip_checkout_success_page: false
-            }
-          }
-        ],
-        metadata: {
-          ...metadata,
-          server_version: "1.4"
-        }
-      };
-
-      const response = await fetch("https://api.pagar.me/core/v5/orders", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": authHeader
-        },
-        body: JSON.stringify(payload)
-      });
-
-      const order = await response.json();
-      
-      if (!response.ok) {
-        console.error("Pagar.me API Error RAW:", JSON.stringify(order, null, 2));
-        return res.status(response.status).json({ message: order.message || "Erro de validação", details: order });
-      }
-
-      res.json({
-        order_id: order.id,
-        checkout_url: order.checkouts?.[0]?.payment_url
-      });
-    } catch (error: any) {
-      console.error("Create Order Runtime Error:", error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // API: Tokenizar CC (Prototipagem - NÃO USAR EM PRODUÇÃO)
-  app.post("/api/pagarme/tokenize", async (req, res) => {
-    try {
-      const { card } = req.body;
-      const secretKey = process.env.PAGARME_SECRET_KEY;
-      if (!secretKey) return res.status(500).json({ error: "Secret key missing" });
-      
-      const authHeader = `Basic ${Buffer.from(secretKey + ":").toString("base64")}`;
-      
-      const response = await fetch("https://api.pagar.me/core/v5/tokens?appId=v5", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": authHeader
-        },
-        body: JSON.stringify({ type: "card", card })
-      });
-      
-      const result = await response.json();
-      if (!response.ok) return res.status(response.status).json(result);
-      res.json(result);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-  });
-
-  // API: Criar Pedido com CC (Transparent)
-  app.post("/api/pagarme/create-cc-order", async (req, res) => {
-    try {
-      const { amount, customer, items, metadata, card_token } = req.body;
-      const secretKey = process.env.PAGARME_SECRET_KEY;
-      if (!secretKey) return res.status(500).json({ error: "Secret key missing" });
-      
-      const authHeader = `Basic ${Buffer.from(secretKey + ":").toString("base64")}`;
-      
-      const payload = {
-        items: items.map((item: any) => ({
-          amount: Math.max(100, Math.round(Number(item.amount))),
-          description: String(item.description || "Inscrição").substring(0, 250),
-          quantity: 1,
-          code: String(item.code || "REGISTRO").substring(0, 50)
-        })),
-        customer: {
-          name: (customer.name || "Participante").substring(0, 64),
-          email: customer.email,
-          type: "individual",
-          document: String(customer.cpf || "").replace(/\D/g, '') || "00000000000",
-          document_type: "CPF"
-        },
-        payments: [{
-          payment_method: "credit_card",
-          credit_card: {
-            installments: 1,
-            card: {
-              token: card_token
-            }
-          }
-        }],
-        metadata
-      };
-      
-      const response = await fetch("https://api.pagar.me/core/v5/orders", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": authHeader
-        },
-        body: JSON.stringify(payload)
-      });
-      
-      const result = await response.json();
-      if (!response.ok) return res.status(response.status).json(result);
-      res.json(result);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-  });
-
-  // API: Webhook Pagar.me
-  app.post("/api/pagarme/webhook", async (req, res) => {
-    try {
-      const event = req.body;
-      console.log("Webhook received:", event.type);
-
-      if (event.type === "order.paid") {
-        const order = event.data;
-        const { type, participant_id } = order.metadata;
-
-        let table = type === 'curso' ? 'curso_participantes' : 'modulo_participantes';
-        
-        const { error } = await supabase
-          .from(table)
-          .update({ status: 'pago' })
-          .eq('id', participant_id);
-
-        if (error) {
-          console.error(`Error updating status for ${participant_id}:`, error);
-          return res.status(500).send("Database update failed");
-        }
-      }
-
-      res.status(200).send("Webhook received");
-    } catch (error: any) {
-      console.error("Webhook Error:", error);
-      res.status(500).send(error.message);
-    }
-  });
-
-  const distPath = path.resolve(process.cwd(), "dist");
-  if (fs.existsSync(distPath)) {
-    // Servir arquivos estáticos com cache curto, exceto index.html
-    app.use(express.static(distPath, {
-      maxAge: '1h',
-      setHeaders: (res, path) => {
-        if (path.endsWith('index.html')) {
-          res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-          res.setHeader('Pragma', 'no-cache');
-          res.setHeader('Expires', '0');
-          res.setHeader('Surrogate-Control', 'no-store');
-        }
-      }
-    }));
+    const order = await response.json();
     
-    app.get("*", (req, res) => {
-      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-      res.setHeader('Pragma', 'no-cache');
-      res.setHeader('Expires', '0');
-      res.sendFile(path.resolve(distPath, "index.html"));
+    if (!response.ok) {
+      console.error("Pagar.me API Error RAW:", JSON.stringify(order, null, 2));
+      return res.status(response.status).json({ message: order.message || "Erro de validação", details: order });
+    }
+
+    res.json({
+      order_id: order.id,
+      checkout_url: order.checkouts?.[0]?.payment_url
     });
-  } else {
+  } catch (error: any) {
+    console.error("Create Order Runtime Error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/api/pagarme/tokenize", async (req, res) => {
+  try {
+    const { card } = req.body;
+    const secretKey = process.env.PAGARME_SECRET_KEY;
+    if (!secretKey) return res.status(500).json({ error: "Secret key missing" });
+    
+    const authHeader = `Basic ${Buffer.from(secretKey + ":").toString("base64")}`;
+    
+    const response = await fetch("https://api.pagar.me/core/v5/tokens?appId=v5", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": authHeader
+      },
+      body: JSON.stringify({ type: "card", card })
+    });
+    
+    const result = await response.json();
+    if (!response.ok) return res.status(response.status).json(result);
+    res.json(result);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/api/pagarme/create-cc-order", async (req, res) => {
+  try {
+    const { amount, customer, items, metadata, card_token } = req.body;
+    const secretKey = process.env.PAGARME_SECRET_KEY;
+    if (!secretKey) return res.status(500).json({ error: "Secret key missing" });
+    
+    const authHeader = `Basic ${Buffer.from(secretKey + ":").toString("base64")}`;
+    
+    const payload = {
+      items: items.map((item: any) => ({
+        amount: Math.max(100, Math.round(Number(item.amount))),
+        description: String(item.description || "Inscrição").substring(0, 250),
+        quantity: 1,
+        code: String(item.code || "REGISTRO").substring(0, 50)
+      })),
+      customer: {
+        name: (customer.name || "Participante").substring(0, 64),
+        email: customer.email,
+        type: "individual",
+        document: String(customer.cpf || "").replace(/\D/g, '') || "00000000000",
+        document_type: "CPF"
+      },
+      payments: [{
+        payment_method: "credit_card",
+        credit_card: {
+          installments: 1,
+          card: {
+            token: card_token
+          }
+        }
+      }],
+      metadata
+    };
+    
+    const response = await fetch("https://api.pagar.me/core/v5/orders", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": authHeader
+      },
+      body: JSON.stringify(payload)
+    });
+    
+    const result = await response.json();
+    if (!response.ok) return res.status(response.status).json(result);
+    res.json(result);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/api/pagarme/webhook", async (req, res) => {
+  try {
+    const event = req.body;
+    console.log("Webhook received:", event.type);
+
+    if (event.type === "order.paid") {
+      const order = event.data;
+      const { type, participant_id } = order.metadata;
+
+      let table = type === 'curso' ? 'curso_participantes' : 'modulo_participantes';
+      
+      const { error } = await supabase
+        .from(table)
+        .update({ status: 'pago' })
+        .eq('id', participant_id);
+
+      if (error) {
+        console.error(`Error updating status for ${participant_id}:`, error);
+        return res.status(500).send("Database update failed");
+      }
+    }
+
+    res.status(200).send("Webhook received");
+  } catch (error: any) {
+    console.error("Webhook Error:", error);
+    res.status(500).send(error.message);
+  }
+});
+
+async function setupApp() {
+  const distPath = path.resolve(process.cwd(), "dist");
+
+  if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
+  } else if (fs.existsSync(distPath)) {
+    app.use(express.static(distPath, {
+      maxAge: '1h',
+      setHeaders: (res, path) => {
+        if (path.endsWith('index.html')) {
+          res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        }
+      }
+    }));
+    
+    app.get("*", (req, res) => {
+      res.sendFile(path.resolve(distPath, "index.html"));
+    });
   }
-
-  return app;
 }
 
-const appPromise = startServer();
+setupApp();
 
-if (process.env.NODE_ENV !== "production" || !process.env.VERCEL) {
-  appPromise.then(configuredApp => {
-    configuredApp.listen(PORT, "0.0.0.0", () => {
-      console.log(`Server running on http://localhost:${PORT}`);
-    });
+if (!process.env.VERCEL) {
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${PORT}`);
   });
 }
 

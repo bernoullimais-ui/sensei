@@ -1,4 +1,2 @@
-import app from '../server.ts';
-export default (req: any, res: any) => {
-  return app(req, res);
-};
+import app from '../server';
+export default app;
