@@ -65,10 +65,12 @@ export function PerfisAdmin({ loggedUser, showToast }: PerfisAdminProps) {
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
-            <div>
-              <h2 className="text-lg font-bold text-slate-900">{selectedCandidate.nome}</h2>
-              <p className="text-sm text-slate-500">{getNextDan(selectedCandidate.grau_atual || selectedCandidate.graduacao)} • {selectedCandidate.dojo}</p>
-            </div>
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">{selectedCandidate.nome}</h2>
+                <p className="text-sm text-slate-500">
+                  {selectedCandidate.curriculo_json?.grauPretendido || selectedCandidate.grau_pretendido || getNextDan(selectedCandidate.grau_atual || selectedCandidate.graduacao)} • {selectedCandidate.dojo}
+                </p>
+              </div>
           </div>
           <div className="flex gap-2">
             <button 
@@ -152,7 +154,7 @@ export function PerfisAdmin({ loggedUser, showToast }: PerfisAdminProps) {
                     </td>
                     <td className="p-4">
                       <span className="px-2 py-1 bg-red-50 text-red-700 rounded-md text-xs font-bold border border-red-100" title={`Graduação Atual: ${c.grau_atual || c.graduacao || '?'}`}>
-                        {getNextDan(c.grau_atual || c.graduacao)}
+                        {c.curriculo_json?.grauPretendido || c.grau_pretendido || getNextDan(c.grau_atual || c.graduacao)}
                       </span>
                     </td>
                     <td className="p-4 text-slate-600 text-sm">

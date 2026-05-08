@@ -1959,10 +1959,10 @@ export default function App() {
       if (lines.length < 2) return alert('CSV inválido ou vazio. Certifique-se de ter um cabeçalho.');
       
       const newCandidatos = lines.slice(1).map(line => {
-        const [nome, grau, dojo, zempo] = line.split(/[,;]/).map(v => v?.trim() || '');
+        const [nome, grau_atual_csv, grau, dojo, zempo] = line.split(/[,;]/).map(v => v?.trim() || '');
         
         let parsedGrau: Dan = 'Shodan (1º Dan)';
-        const grauUpper = grau.toUpperCase();
+        const grauUpper = (grau || '').toUpperCase();
         if (grauUpper.includes('1') || grauUpper.includes('SHODAN')) parsedGrau = 'Shodan (1º Dan)';
         else if (grauUpper.includes('2') || grauUpper.includes('NIDAN')) parsedGrau = 'Nidan (2º Dan)';
         else if (grauUpper.includes('3') || grauUpper.includes('SANDAN')) parsedGrau = 'Sandan (3º Dan)';
@@ -1971,6 +1971,7 @@ export default function App() {
 
         return {
           nome: nome || 'Sem Nome',
+          grau_atual: grau_atual_csv || '',
           grau_pretendido: parsedGrau,
           dojo: dojo || '',
           zempo: zempo || '',
@@ -2284,7 +2285,7 @@ export default function App() {
     let filename = '';
     
     if (type === 'candidatos') {
-      content = 'nome, grau_pretendido, dojo, zempo\nJoão Silva, Shodan (1º Dan), Associação de Judô, 123456\nMaria Souza, Nidan (2º Dan), Clube Central, 654321\n';
+      content = 'nome, grau_atual, grau_pretendido, dojo, zempo\nJoão Silva, Marrom, Shodan (1º Dan), Associação de Judô, 123456\nMaria Souza, 1º Dan, Nidan (2º Dan), Clube Central, 654321\n';
       filename = 'modelo_candidatos.csv';
     } else if (type === 'avaliadores') {
       content = 'nome, graduacao, zempo, funcao\nSensei Tanaka, 6º Dan, 111111, gestor\nSensei Oliveira, 5º Dan, 222222, avaliador\n';
@@ -3938,7 +3939,7 @@ export default function App() {
             </div>
 
             <div className="bg-blue-50 p-3 rounded-md border border-blue-100 mb-6 text-sm text-blue-800">
-              <strong>Formato esperado do CSV:</strong> <code>nome, grau_pretendido, dojo, zempo</code> (A primeira linha deve ser o cabeçalho).
+              <strong>Formato esperado do CSV:</strong> <code>nome, grau_atual, grau_pretendido, dojo, zempo</code> (A primeira linha deve ser o cabeçalho).
             </div>
 
             {candidatos.length === 0 ? (
@@ -3949,6 +3950,7 @@ export default function App() {
                   <thead>
                     <tr className="bg-slate-50 border-b border-slate-200">
                       <th className="p-3 text-sm font-semibold text-slate-600">Nome</th>
+                      <th className="p-3 text-sm font-semibold text-slate-600">Graduação Atual</th>
                       <th className="p-3 text-sm font-semibold text-slate-600">Grau Pretendido</th>
                       <th className="p-3 text-sm font-semibold text-slate-600">Dojo / Clube</th>
                       <th className="p-3 text-sm font-semibold text-slate-600">Zempo (RNJ)</th>
@@ -3962,6 +3964,11 @@ export default function App() {
                           <input type="text" value={c.nome} onChange={(e) => {
                             const newC = [...candidatos]; newC[i].nome = e.target.value; setCandidatos(newC);
                           }} onBlur={(e) => updateCandidatoDB(c.id, 'nome', e.target.value)} className="w-full p-1.5 border border-transparent hover:border-slate-300 focus:border-red-500 rounded outline-none bg-transparent focus:bg-white" placeholder="Nome do Candidato" />
+                        </td>
+                        <td className="p-2">
+                          <input type="text" value={c.grau_atual || ''} onChange={(e) => {
+                            const newC = [...candidatos]; newC[i].grau_atual = e.target.value; setCandidatos(newC);
+                          }} onBlur={(e) => updateCandidatoDB(c.id, 'grau_atual', e.target.value)} className="w-full p-1.5 border border-transparent hover:border-slate-300 focus:border-red-500 rounded outline-none bg-transparent focus:bg-white" placeholder="Ex: 1º Dan" />
                         </td>
                         <td className="p-2">
                           <select value={c.grau_pretendido} onChange={(e) => {
