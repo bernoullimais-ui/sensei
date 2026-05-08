@@ -21,6 +21,12 @@ export function BancoQuestoes({ loggedUser }: BancoQuestoesProps) {
   const [opcaoD, setOpcaoD] = useState('');
   const [opcaoE, setOpcaoE] = useState('');
   const [gabarito, setGabarito] = useState('A');
+  const [tema, setTema] = useState('');
+  const [dificuldade, setDificuldade] = useState('Médio');
+
+  // Filtros
+  const [filtroTema, setFiltroTema] = useState('');
+  const [filtroDificuldade, setFiltroDificuldade] = useState('');
 
   // Modal states
   const [modalOpen, setModalOpen] = useState(false);
@@ -63,6 +69,8 @@ export function BancoQuestoes({ loggedUser }: BancoQuestoesProps) {
         opcao_d: opcaoD,
         opcao_e: opcaoE,
         gabarito,
+        tema,
+        dificuldade,
         organizacao_id: loggedUser?.organizacao_id
       }]).select();
 
@@ -131,6 +139,8 @@ export function BancoQuestoes({ loggedUser }: BancoQuestoesProps) {
         const idxD = headers.findIndex(h => h === 'opcao_d' || h === 'd');
         const idxE = headers.findIndex(h => h === 'opcao_e' || h === 'e');
         const idxGab = headers.findIndex(h => h === 'gabarito' || h === 'resposta');
+        const idxTema = headers.findIndex(h => h === 'tema' || h === 'categoria');
+        const idxDificuldade = headers.findIndex(h => h === 'dificuldade' || h === 'nivel' || h === 'nível');
 
         if (idxTexto === -1 || idxA === -1 || idxGab === -1) {
           setModalMessage('Cabeçalho inválido. Certifique-se de que as colunas texto, opcao_a, opcao_b, opcao_c, opcao_d, opcao_e e gabarito existam.');
@@ -161,6 +171,8 @@ export function BancoQuestoes({ loggedUser }: BancoQuestoesProps) {
               opcao_d: values[idxD] || '',
               opcao_e: values[idxE] || '',
               gabarito: gab,
+              tema: idxTema !== -1 ? values[idxTema] || '' : '',
+              dificuldade: idxDificuldade !== -1 ? values[idxDificuldade] || 'Médio' : 'Médio',
               organizacao_id: loggedUser?.organizacao_id
             });
           }
@@ -194,8 +206,8 @@ export function BancoQuestoes({ loggedUser }: BancoQuestoesProps) {
   };
 
   const downloadTemplate = () => {
-    const headers = ['texto', 'opcao_a', 'opcao_b', 'opcao_c', 'opcao_d', 'opcao_e', 'gabarito'];
-    const example = ['Qual a tradução de Judô?', 'Caminho Suave', 'Caminho Duro', 'Arte da Espada', 'Caminho do Punho', 'Arte Suave', 'A'];
+    const headers = ['texto', 'opcao_a', 'opcao_b', 'opcao_c', 'opcao_d', 'opcao_e', 'gabarito', 'tema', 'dificuldade'];
+    const example = ['Qual a tradução de Judô?', 'Caminho Suave', 'Caminho Duro', 'Arte da Espada', 'Caminho do Punho', 'Arte Suave', 'A', 'História', 'Fácil'];
     
     const csvContent = [
       headers.join(','),
@@ -213,9 +225,12 @@ export function BancoQuestoes({ loggedUser }: BancoQuestoesProps) {
     document.body.removeChild(link);
   };
 
-  const filteredQuestoes = questoes.filter(q => 
-    filtroTexto === '' || q.texto.toLowerCase().includes(filtroTexto.toLowerCase())
-  );
+  const filteredQuestoes = questoes.filter(q => {
+    const searchMatch = filtroTexto === '' || q.texto.toLowerCase().includes(filtroTexto.toLowerCase());
+    const temaMatch = filtroTema === '' || (q.tema && q.tema.toLowerCase().includes(filtroTema.toLowerCase()));
+    const dificuldadeMatch = filtroDificuldade === '' || q.dificuldade === filtroDificuldade;
+    return searchMatch && temaMatch && dificuldadeMatch;
+  });
 
   return (
     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 animate-in fade-in">
@@ -276,6 +291,30 @@ export function BancoQuestoes({ loggedUser }: BancoQuestoesProps) {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Tema / Categoria</label>
+                <input 
+                  type="text" 
+                  value={tema}
+                  onChange={e => setTema(e.target.value)}
+                  placeholder="Ex: História, Nague-waza, Arbitragem..."
+                  className="w-full p-2 border border-slate-300 rounded-md text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Nível de Dificuldade</label>
+                <select 
+                  value={dificuldade}
+                  onChange={e => setDificuldade(e.target.value)}
+                  className="w-full p-2 border border-slate-300 rounded-md text-sm"
+                >
+                  <option value="Fácil">Fácil</option>
+                  <option value="Médio">Médio</option>
+                  <option value="Difícil">Difícil</option>
+                </select>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
                 <label className="block text-xs font-medium text-slate-500 mb-1">Opção A</label>
                 <input type="text" required value={opcaoA} onChange={e => setOpcaoA(e.target.value)} className="w-full p-2 border border-slate-300 rounded-md text-sm" />
               </div>
@@ -314,16 +353,37 @@ export function BancoQuestoes({ loggedUser }: BancoQuestoesProps) {
         </form>
       )}
 
-      <div className="mb-6">
+      <div className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="relative">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input 
             type="text" 
             placeholder="Pesquisar questões..." 
-            className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-red-500 outline-none"
+            className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-red-500 outline-none text-sm"
             value={filtroTexto}
             onChange={e => setFiltroTexto(e.target.value)}
           />
+        </div>
+        <div>
+          <input 
+            type="text" 
+            placeholder="Filtrar por Tema..." 
+            className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-red-500 outline-none text-sm"
+            value={filtroTema}
+            onChange={e => setFiltroTema(e.target.value)}
+          />
+        </div>
+        <div>
+          <select 
+            className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-red-500 outline-none text-sm"
+            value={filtroDificuldade}
+            onChange={e => setFiltroDificuldade(e.target.value)}
+          >
+            <option value="">Todas as Dificuldades</option>
+            <option value="Fácil">Fácil</option>
+            <option value="Médio">Médio</option>
+            <option value="Difícil">Difícil</option>
+          </select>
         </div>
       </div>
 
@@ -337,6 +397,20 @@ export function BancoQuestoes({ loggedUser }: BancoQuestoesProps) {
             <div key={q.id} className="border border-slate-200 rounded-lg p-4 hover:border-slate-300 transition-colors">
               <div className="flex justify-between items-start gap-4">
                 <div className="flex-1">
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {q.tema && (
+                      <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-[10px] font-bold uppercase rounded border border-blue-100">
+                        {q.tema}
+                      </span>
+                    )}
+                    <span className={`px-2 py-0.5 text-[10px] font-bold uppercase rounded border ${
+                      q.dificuldade === 'Difícil' ? 'bg-red-50 text-red-700 border-red-100' : 
+                      q.dificuldade === 'Fácil' ? 'bg-green-50 text-green-700 border-green-100' : 
+                      'bg-orange-50 text-orange-700 border-orange-100'
+                    }`}>
+                      {q.dificuldade || 'Médio'}
+                    </span>
+                  </div>
                   <p className="font-medium text-slate-800 mb-3"><span className="text-slate-400 mr-2">#{i + 1}</span>{q.texto}</p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
                     <div className={`p-2 rounded ${q.gabarito === 'A' ? 'bg-green-100 text-green-800 font-medium border border-green-200' : 'bg-slate-50 text-slate-600'}`}>A) {q.opcao_a}</div>

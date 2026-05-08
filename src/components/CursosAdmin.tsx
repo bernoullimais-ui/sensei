@@ -206,8 +206,8 @@ export function CursosAdmin() {
 
   const applyCommand = (command: string, value: string = '') => {
     if (artigoTextareaRef.current) {
-      document.execCommand(command, false, value);
       artigoTextareaRef.current.focus();
+      document.execCommand(command, false, value);
       setEditingStep(prev => ({...prev, descricao: artigoTextareaRef.current!.innerHTML}));
     }
   };

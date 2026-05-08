@@ -467,7 +467,40 @@ export default function App() {
   const [loginZempo, setLoginZempo] = useState('');
   const [senhaZempo, setSenhaZempo] = useState('');
   const [loginError, setLoginError] = useState('');
+  const [isForgotPasswordSent, setIsForgotPasswordSent] = useState(false);
   const [requirePasswordChange, setRequirePasswordChange] = useState(false);
+
+  // Recovery link detection
+  useEffect(() => {
+    if (!supabase || !supabase.auth) return;
+    
+    supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        console.log('Password recovery session detected');
+        if (session?.user) {
+          // Fetch user profile to ensure we have the correct role/context
+          const { data: userProfile } = await supabase
+            .from('usuarios')
+            .select('*')
+            .eq('id', session.user.id)
+            .single();
+          
+          if (userProfile) {
+            const enriched = await enrichUserProfile(userProfile);
+            if (enriched) {
+              setLoggedUser(enriched.profile);
+              setLoggedRole(enriched.role);
+              setRequirePasswordChange(true);
+            }
+          } else {
+             // Fallback if no profile yet
+             setLoggedUser({ id: session.user.id, email: session.user.email });
+             setRequirePasswordChange(true);
+          }
+        }
+      }
+    });
+  }, []);
 
   // Fetch organization settings
   useEffect(() => {
@@ -1790,25 +1823,42 @@ export default function App() {
     setPasswordChangeError('');
 
     try {
-      const { supabase } = await import('./lib/supabase');
-      const table = loggedRole === 'avaliador' ? 'avaliadores' : 'candidatos';
+      // 1. Update Auth password
+      const { error: authError } = await supabase.auth.updateUser({
+        password: newPassword
+      });
 
-      const { error } = await supabase
-        .from(table)
-        .update({ senha: newPassword })
-        .eq('id', loggedUser!.id);
+      if (authError) throw authError;
 
-      if (error) throw error;
+      // 2. Update Database field (legacy/internal reference)
+      if (loggedUser) {
+        const table = loggedRole === 'avaliador' ? 'avaliadores' : 'candidatos';
+        
+        // Only try to update table if it exists
+        if (loggedRole && loggedRole !== 'admin' && loggedRole !== 'coordenador') {
+          const { error } = await supabase
+            .from(table)
+            .update({ senha: newPassword })
+            .eq('id', loggedUser.id);
+          
+          if (error) console.warn('Erro ao atualizar senha na tabela legada:', error);
+        }
 
-      setLoggedUser({ ...loggedUser!, senha: newPassword });
-      if (loggedRole === 'avaliador') {
-        setAvaliadores(prev => prev.map(a => a.id === loggedUser!.id ? { ...a, senha: newPassword } : a));
-      } else {
-        setCandidatos(prev => prev.map(c => c.id === loggedUser!.id ? { ...c, senha: newPassword } : c));
+        setLoggedUser({ ...loggedUser, senha: newPassword });
+        if (loggedRole === 'avaliador') {
+          setAvaliadores(prev => prev.map(a => a.id === loggedUser.id ? { ...a, senha: newPassword } : a));
+        } else if (loggedRole === 'candidato') {
+          setCandidatos(prev => prev.map(c => c.id === loggedUser.id ? { ...c, senha: newPassword } : c));
+        }
       }
       
       setRequirePasswordChange(false);
       showToast('Senha atualizada com sucesso!', 'success');
+      
+      // Clear URL params if any
+      if (window.location.hash || window.location.search) {
+        window.history.replaceState(null, '', window.location.pathname);
+      }
     } catch (error: any) {
       console.error('Erro ao atualizar senha:', error);
       setPasswordChangeError(`Erro ao atualizar: ${error.message}`);
@@ -3212,6 +3262,30 @@ export default function App() {
     }
   };
 
+  const handleForgotPassword = async (email: string) => {
+    setIsLoggingIn(true);
+    setLoginError('');
+    try {
+      // Garantir que estamos usando a URL correta de redirecionamento
+      // Em ambientes de preview, window.location.origin pode falhar se não estivermos no domínio principal
+      const currentOrigin = window.location.origin;
+      console.log('Solicitando redefinição de senha para:', email, 'com redirectTo:', currentOrigin);
+
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: currentOrigin,
+      });
+
+      if (error) throw error;
+      
+      setLoginError(`E-mail de recuperação enviado! Verifique sua caixa de entrada. O link de redefinição levará você de volta para: ${currentOrigin}. Certifique-se de que este endereço está correto.`);
+    } catch (err: any) {
+      console.error('Password reset error:', err);
+      setLoginError(err.message || 'Erro ao enviar e-mail de recuperação.');
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
   const fullCandidatoData = useMemo(() => {
     if ((loggedRole === 'candidato' || loggedRole === 'ouvinte') && loggedUser) {
       const candInfo = candidatos.find(c => c.id === (loggedUser.reference_id || loggedUser.id));
@@ -3266,6 +3340,7 @@ export default function App() {
       onCheckZempo={handleCheckZempo}
       onFirstAccess={handleFirstAccess}
       onOnboarding={handleOnboarding}
+      onForgotPassword={handleForgotPassword}
       loginError={loginError} 
       isLoading={isLoggingIn} 
     />;

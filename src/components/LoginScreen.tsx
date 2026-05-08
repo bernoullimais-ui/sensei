@@ -6,12 +6,13 @@ interface LoginScreenProps {
   onCheckZempo: (zempo: string) => Promise<any>;
   onFirstAccess: (zempo: string, email: string, senha: string, telefone: string, userData: any, role: string) => Promise<void>;
   onOnboarding: (nomeOrganizacao: string, nomeAdmin: string, emailAdmin: string, senhaAdmin: string) => Promise<void>;
+  onForgotPassword: (email: string) => Promise<void>;
   loginError: string;
   isLoading?: boolean;
 }
 
-export function LoginScreen({ onLogin, onCheckZempo, onFirstAccess, onOnboarding, loginError, isLoading }: LoginScreenProps) {
-  const [mode, setMode] = useState<'login' | 'check_zempo' | 'complete_signup' | 'onboarding'>('login');
+export function LoginScreen({ onLogin, onCheckZempo, onFirstAccess, onOnboarding, onForgotPassword, loginError, isLoading }: LoginScreenProps) {
+  const [mode, setMode] = useState<'login' | 'check_zempo' | 'complete_signup' | 'onboarding' | 'forgot_password'>('login');
   
   // Login state
   const [email, setEmail] = useState('');
@@ -159,7 +160,7 @@ export function LoginScreen({ onLogin, onCheckZempo, onFirstAccess, onOnboarding
                     <label className="block text-sm font-semibold text-slate-700">Senha</label>
                     <button 
                       type="button" 
-                      onClick={() => alert('Para redefinir sua senha, por favor entre em contato com a administração.')}
+                      onClick={() => setMode('forgot_password')}
                       className="text-xs lg:text-sm font-medium text-red-600 hover:text-red-800 transition-colors"
                     >
                       Esqueci minha senha
@@ -227,6 +228,80 @@ export function LoginScreen({ onLogin, onCheckZempo, onFirstAccess, onOnboarding
                   Nova Federação/Clube? Crie sua conta
                 </button>
               </div>
+            </>
+          )}
+
+          {mode === 'forgot_password' && (
+            <>
+              <div className="mb-6 lg:mb-8">
+                <button 
+                  onClick={() => setMode('login')}
+                  className="flex items-center text-sm font-medium text-slate-500 hover:text-slate-800 mb-4 transition-colors"
+                >
+                  <ArrowLeft className="w-4 h-4 mr-1" /> Voltar para o login
+                </button>
+                <h2 className="text-xl lg:text-2xl font-bold text-slate-900 mb-1 lg:mb-2">
+                  Recuperar Senha
+                </h2>
+                <p className="text-slate-500 text-sm lg:text-base">
+                  Informe seu e-mail para receber as instruções de redefinição.
+                </p>
+              </div>
+
+              <form 
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  if (!email.trim()) {
+                    setLocalError('Por favor, informe seu e-mail.');
+                    return;
+                  }
+                  await onForgotPassword(email.trim());
+                }} 
+                className="space-y-4 lg:space-y-6"
+              >
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5 lg:mb-2">E-mail</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                      <User className="h-5 w-5 text-slate-400" />
+                    </div>
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="w-full pl-12 lg:pl-12 p-3 lg:p-3.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none transition-all shadow-sm text-sm lg:text-base"
+                      placeholder="seu@email.com"
+                      required
+                    />
+                  </div>
+                </div>
+
+                {displayError && (
+                  <div className={`p-3 lg:p-4 rounded-xl text-sm flex items-start gap-3 animate-in fade-in slide-in-from-top-2 ${
+                    displayError.includes('sucesso') || displayError.includes('enviado') 
+                      ? 'bg-green-50 border border-green-200 text-green-700' 
+                      : 'bg-red-50 border border-red-200 text-red-700'
+                  }`}>
+                    {displayError.includes('sucesso') || displayError.includes('enviado') 
+                      ? <CheckCircle2 className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                      : <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                    }
+                    <p>{displayError}</p>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="w-full bg-red-700 hover:bg-red-800 text-white p-3 lg:p-4 rounded-xl font-bold text-base lg:text-lg flex items-center justify-center gap-2 transition-all shadow-md hover:shadow-lg disabled:opacity-70 disabled:cursor-not-allowed"
+                >
+                  {isLoading ? (
+                    <div className="w-5 h-5 lg:w-6 lg:h-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  ) : (
+                    'Enviar Instruções'
+                  )}
+                </button>
+              </form>
             </>
           )}
 

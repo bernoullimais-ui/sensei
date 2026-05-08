@@ -24,6 +24,11 @@ export function ProvasTeoricasAdmin({ loggedUser }: ProvasTeoricasAdminProps) {
   const [duracaoMinutos, setDuracaoMinutos] = useState('60');
   const [selectedQuestoes, setSelectedQuestoes] = useState<Set<string>>(new Set());
 
+  // Filtros de questões
+  const [filtroQuestaoTexto, setFiltroQuestaoTexto] = useState('');
+  const [filtroQuestaoTema, setFiltroQuestaoTema] = useState('');
+  const [filtroQuestaoDificuldade, setFiltroQuestaoDificuldade] = useState('');
+
   // Modal states
   const [modalConfig, setModalConfig] = useState<{
     isOpen: boolean;
@@ -348,24 +353,67 @@ export function ProvasTeoricasAdmin({ loggedUser }: ProvasTeoricasAdminProps) {
                 Sortear Questões
               </button>
             </div>
+            <div className="flex flex-col gap-2 mb-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                <input 
+                  type="text" 
+                  placeholder="Pesquisar texto..."
+                  className="p-1.5 border border-slate-300 rounded text-xs"
+                  value={filtroQuestaoTexto}
+                  onChange={e => setFiltroQuestaoTexto(e.target.value)}
+                />
+                <input 
+                  type="text" 
+                  placeholder="Tema..."
+                  className="p-1.5 border border-slate-300 rounded text-xs"
+                  value={filtroQuestaoTema}
+                  onChange={e => setFiltroQuestaoTema(e.target.value)}
+                />
+                <select 
+                  className="p-1.5 border border-slate-300 rounded text-xs"
+                  value={filtroQuestaoDificuldade}
+                  onChange={e => setFiltroQuestaoDificuldade(e.target.value)}
+                >
+                  <option value="">Todas Dificuldades</option>
+                  <option value="Fácil">Fácil</option>
+                  <option value="Médio">Médio</option>
+                  <option value="Difícil">Difícil</option>
+                </select>
+              </div>
+            </div>
             <div className="max-h-64 overflow-y-auto border border-slate-200 rounded-md bg-white">
               {questoes.length === 0 ? (
                 <p className="p-4 text-center text-slate-500 text-sm">Nenhuma questão cadastrada no banco.</p>
               ) : (
                 <ul className="divide-y divide-slate-100">
-                  {questoes.map(q => (
-                    <li key={q.id} className="p-3 hover:bg-slate-50 flex items-start gap-3">
-                      <input 
-                        type="checkbox" 
-                        className="mt-1 rounded text-red-600 focus:ring-red-500 cursor-pointer"
-                        checked={selectedQuestoes.has(q.id)}
-                        onChange={() => toggleQuestao(q.id)}
-                      />
-                      <div className="flex-1 cursor-pointer" onClick={() => toggleQuestao(q.id)}>
-                        <p className="text-sm font-medium text-slate-800">{q.texto}</p>
-                      </div>
-                    </li>
-                  ))}
+                  {questoes
+                    .filter(q => {
+                      const txtMatch = filtroQuestaoTexto === '' || q.texto.toLowerCase().includes(filtroQuestaoTexto.toLowerCase());
+                      const temaMatch = filtroQuestaoTema === '' || (q.tema && q.tema.toLowerCase().includes(filtroQuestaoTema.toLowerCase()));
+                      const difMatch = filtroQuestaoDificuldade === '' || q.dificuldade === filtroQuestaoDificuldade;
+                      return txtMatch && temaMatch && difMatch;
+                    })
+                    .map(q => (
+                      <li key={q.id} className="p-3 hover:bg-slate-50 flex items-start gap-3">
+                        <input 
+                          type="checkbox" 
+                          className="mt-1 rounded text-red-600 focus:ring-red-500 cursor-pointer"
+                          checked={selectedQuestoes.has(q.id)}
+                          onChange={() => toggleQuestao(q.id)}
+                        />
+                        <div className="flex-1 cursor-pointer" onClick={() => toggleQuestao(q.id)}>
+                          <div className="flex items-center gap-2 mb-1">
+                            {q.tema && <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 text-[9px] font-bold uppercase rounded border border-blue-100">{q.tema}</span>}
+                            <span className={`px-1.5 py-0.5 text-[9px] font-bold uppercase rounded border ${
+                              q.dificuldade === 'Difícil' ? 'bg-red-50 text-red-700 border-red-100' : 
+                              q.dificuldade === 'Fácil' ? 'bg-green-50 text-green-700 border-green-100' : 
+                              'bg-orange-50 text-orange-700 border-orange-100'
+                            }`}>{q.dificuldade || 'Médio'}</span>
+                          </div>
+                          <p className="text-sm font-medium text-slate-800">{q.texto}</p>
+                        </div>
+                      </li>
+                    ))}
                 </ul>
               )}
             </div>
