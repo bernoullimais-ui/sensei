@@ -186,3 +186,45 @@ export function getAnosValidosCargo(anoInicial: string, anoFinal: string, anoExa
   return validCount;
 }
 
+export function getRequiredPoints(grau: string): number {
+  if (!grau) return 700;
+  const match = grau.match(/(\d+)/);
+  if (match) {
+    const num = parseInt(match[1]);
+    if (num === 1) return 700;
+    if (num === 2) return 750;
+    if (num === 3) return 1200;
+    if (num === 4) return 1500;
+    if (num === 5) return 2000;
+    if (num === 6) return 6300;
+    if (num === 7) return 7200;
+    if (num === 8) return 7200;
+    return 7200;
+  }
+  return 700;
+}
+
+export function getNextDan(currentGrad: string): string {
+  if (!currentGrad) return '1º Dan';
+  
+  // Try to find the number first (e.g., "1º Dan", "1. Dan", "1 Dan")
+  const match = currentGrad.match(/(\d+)/);
+  if (match) {
+    const nextNum = parseInt(match[1]) + 1;
+    return `${nextNum}º Dan`;
+  }
+
+  // Fallback for Japanese terms just in case
+  const lowerGrad = currentGrad.toLowerCase();
+  if (lowerGrad.includes('sho dan') || lowerGrad.includes('shodan')) return '2º Dan';
+  if (lowerGrad.includes('ni dan') || lowerGrad.includes('nidan')) return '3º Dan';
+  if (lowerGrad.includes('san dan') || lowerGrad.includes('sandan')) return '4º Dan';
+  if (lowerGrad.includes('yo dan') || lowerGrad.includes('yondan')) return '5º Dan';
+  if (lowerGrad.includes('go dan') || lowerGrad.includes('godan')) return '6º Dan';
+  if (lowerGrad.includes('roku dan') || lowerGrad.includes('rokudan')) return '7º Dan';
+  if (lowerGrad.includes('shichi dan') || lowerGrad.includes('nanadan')) return '8º Dan';
+  if (lowerGrad.includes('hachi dan') || lowerGrad.includes('hachidan')) return '9º Dan';
+
+  return '1º Dan';
+}
+

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Save, Plus, Trash2, FileText, AlertCircle } from 'lucide-react';
+import { Save, Plus, Trash2, FileText, AlertCircle, Award } from 'lucide-react';
+import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import {
   formacaoScores,
   eventosTypes,
@@ -19,16 +20,21 @@ import {
   producaoAcademicaScores,
   getCarenciaAnos,
   isAnoValid,
-  getAnosValidosCargo
+  getAnosValidosCargo,
+  getRequiredPoints,
+  getNextDan
 } from './CurriculoCandidato.utils';
 
 interface CurriculoCandidatoProps {
   candidato: any;
+  tableName?: 'candidatos' | 'avaliadores';
+  onShowToast?: (text: string, type: 'error' | 'success' | 'info') => void;
 }
 
-export function CurriculoCandidato({ candidato }: CurriculoCandidatoProps) {
+export function CurriculoCandidato({ candidato, tableName = 'candidatos', onShowToast }: CurriculoCandidatoProps) {
   const [data, setData] = useState<any>({
     anoExame: new Date().getFullYear().toString(),
+    dataUltimaAvaliacao: '',
     formacao: { escolaridade: '', ano: '', instituicao: '', curso: '', pontuacao: 0 },
     eventos: [],
     arbitragem: { categoriaShiai: '', pontuacaoShiai: 0, ambitoKata: '', quantidadeKata: 1, pontuacaoKata: 0 },
@@ -41,31 +47,115 @@ export function CurriculoCandidato({ candidato }: CurriculoCandidatoProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Derived state calculations (moved to top)
+  const anoExameNum = Number(data.anoExame || new Date().getFullYear());
+  const grauEfetivo = data.grauPretendido || (tableName === 'avaliadores' ? getNextDan(candidato.graduacao) : candidato.grau_pretendido);
+  const carenciaAnosNum = getCarenciaAnos(grauEfetivo || '');
+  const targetPoints = getRequiredPoints(grauEfetivo || '');
+
+  const isLocked = () => {
+    const today = new Date();
+    const currentYear = today.getFullYear();
+    const currentMonth = today.getMonth(); // 0 is January, 11 is December
+    
+    if (currentYear > anoExameNum) return true;
+    if (currentYear === anoExameNum && currentMonth >= 11) return true;
+    return false;
+  };
+  
+  const locked = isLocked();
+
   useEffect(() => {
-    fetchCurriculo();
-  }, []);
+    if (candidato?.id) {
+      fetchCurriculo();
+    }
+  }, [candidato?.id, tableName]);
+
+  // Sync data with enriched candidato info
+  useEffect(() => {
+    if (candidato?.id) {
+      if (tableName === 'avaliadores' && candidato.graduacao) {
+        const nextDan = getNextDan(candidato.graduacao);
+        // If data.grauPretendido is not set or it's the "1º Dan" default while we have a better guess
+        if (!data.grauPretendido || (data.grauPretendido === '1º Dan' && nextDan !== '1º Dan')) {
+          setData(prev => ({ ...prev, grauPretendido: nextDan }));
+        }
+      } else if (tableName === 'candidatos' && candidato.grau_pretendido) {
+        if (!data.grauPretendido || data.grauPretendido === '1º Dan') {
+          setData(prev => ({ ...prev, grauPretendido: candidato.grau_pretendido }));
+        }
+      }
+    }
+  }, [candidato?.graduacao, candidato?.grau_pretendido, candidato?.id, tableName]);
+
+  // Auto-calculate anoExame based on dataUltimaAvaliacao and carencia
+  useEffect(() => {
+    if (data.dataUltimaAvaliacao && carenciaAnosNum > 0) {
+      const lastEvalYear = new Date(data.dataUltimaAvaliacao).getFullYear();
+      const calculatedYear = lastEvalYear + carenciaAnosNum;
+      
+      const currentYear = new Date().getFullYear();
+      // Only auto-update if year was never changed from default
+      if (!data.anoExame || data.anoExame === currentYear.toString()) {
+        setData(prev => ({ ...prev, anoExame: calculatedYear.toString() }));
+      }
+    }
+  }, [data.dataUltimaAvaliacao, carenciaAnosNum]);
 
   const fetchCurriculo = async () => {
+    if (!candidato?.id) return;
+    
     setIsLoading(true);
     try {
       const { data: cData, error } = await supabase
-        .from('candidatos')
+        .from(tableName)
         .select('curriculo_json')
         .eq('id', candidato.id)
         .single();
         
-      if (error) throw error;
+      if (error) {
+        if (error.code !== 'PGRST116') {
+          console.error('Error fetching curriculum:', error);
+        }
+      }
+
       if (cData?.curriculo_json && typeof cData.curriculo_json === 'object') {
+        const fetched = cData.curriculo_json;
+        let finalGrauPretendido = fetched.grauPretendido;
+        
+        // Enrichment if not set in JSON
+        if (!finalGrauPretendido) {
+           if (tableName === 'avaliadores' && candidato?.graduacao) {
+             finalGrauPretendido = getNextDan(candidato.graduacao);
+           } else if (tableName === 'candidatos' && candidato?.grau_pretendido) {
+             finalGrauPretendido = candidato.grau_pretendido;
+           }
+        }
+
         setData((prev: any) => ({
           ...prev,
-          ...cData.curriculo_json,
-          anoExame: cData.curriculo_json.anoExame || prev.anoExame,
-          formacao: { ...prev.formacao, ...(cData.curriculo_json.formacao || {}) },
-          arbitragem: { ...prev.arbitragem, ...(cData.curriculo_json.arbitragem || {}) },
+          ...fetched,
+          grauPretendido: finalGrauPretendido || prev.grauPretendido,
+          anoExame: fetched.anoExame || prev.anoExame,
+          formacao: { ...prev.formacao, ...(fetched.formacao || {}) },
+          arbitragem: { ...prev.arbitragem, ...(fetched.arbitragem || {}) },
+        }));
+      } else {
+        // Defaults for first time
+        let defaultGrau = '1º Dan';
+        if (tableName === 'avaliadores' && candidato?.graduacao) {
+           defaultGrau = getNextDan(candidato.graduacao);
+        } else if (tableName === 'candidatos' && candidato?.grau_pretendido) {
+           defaultGrau = candidato.grau_pretendido;
+        }
+
+        setData(prev => ({
+          ...prev,
+          grauPretendido: defaultGrau
         }));
       }
     } catch (e) {
-      console.error(e);
+      console.error('Error in fetchCurriculo:', e);
     } finally {
       setIsLoading(false);
     }
@@ -75,14 +165,16 @@ export function CurriculoCandidato({ candidato }: CurriculoCandidatoProps) {
     setIsSaving(true);
     try {
       const { error } = await supabase
-        .from('candidatos')
+        .from(tableName)
         .update({ curriculo_json: data })
         .eq('id', candidato.id);
       if (error) {
-        alert('Erro ao salvar currículo. Verifique se a coluna curriculo_json existe no banco.');
+        if (onShowToast) onShowToast('Erro ao salvar currículo. Verifique o banco de dados.', 'error');
+        else alert('Erro ao salvar currículo. Verifique se a coluna curriculo_json existe no banco.');
         throw error;
       }
-      alert('Currículo salvo com sucesso!');
+      if (onShowToast) onShowToast('Currículo salvo com sucesso!', 'success');
+      else alert('Currículo salvo com sucesso!');
     } catch (e) {
       console.error(e);
     } finally {
@@ -105,21 +197,6 @@ export function CurriculoCandidato({ candidato }: CurriculoCandidatoProps) {
     list.splice(index, 1);
     setData({ ...data, [listName]: list });
   };
-
-  const anoExameNum = Number(data.anoExame || new Date().getFullYear());
-  const carenciaAnosNum = getCarenciaAnos(candidato?.grau_pretendido || '');
-
-  const isLocked = () => {
-    const today = new Date();
-    const currentYear = today.getFullYear();
-    const currentMonth = today.getMonth(); // 0 is January, 11 is December
-    
-    if (currentYear > anoExameNum) return true;
-    if (currentYear === anoExameNum && currentMonth >= 11) return true;
-    return false;
-  };
-  
-  const locked = isLocked();
 
   // Helper to sum points
   const calcTotal = () => {
@@ -195,6 +272,28 @@ export function CurriculoCandidato({ candidato }: CurriculoCandidatoProps) {
     return formacaoPts + eventosPts + arbitragemPts + cargosPts + competicoesPts + atuacaoPts + historicoPts + producaoPts;
   };
 
+  const totalPoints = calcTotal();
+
+  const chartData = [
+    { name: 'Alcançado', value: totalPoints },
+    { name: 'Restante', value: Math.max(0, targetPoints - totalPoints) }
+  ];
+
+  const handleLastEvalChange = (date: string) => {
+    if (!date) {
+      setData({ ...data, dataUltimaAvaliacao: date });
+      return;
+    }
+    
+    const year = new Date(date).getFullYear();
+    const recommendedYear = year + carenciaAnosNum;
+    setData({
+      ...data,
+      dataUltimaAvaliacao: date,
+      anoExame: recommendedYear.toString()
+    });
+  };
+
   if (isLoading) return <div className="p-8 text-center animate-pulse">Carregando currículo...</div>;
 
   return (
@@ -202,15 +301,45 @@ export function CurriculoCandidato({ candidato }: CurriculoCandidatoProps) {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 border-b pb-4 gap-4">
         <div>
           <h2 className="text-xl font-bold flex items-center gap-2">
-            <FileText className="w-6 h-6 text-red-600" /> Meu Currículo
+            <Award className="w-6 h-6 text-red-600" /> Currículo de Graduação
           </h2>
           <p className="text-sm text-slate-500 mt-1">Prencha seus dados de acordo com o Regulamento de Graus da CBJ.</p>
         </div>
-        <div className="flex items-center gap-4">
-          <div className="text-right">
-            <div className="text-xs text-slate-500 font-bold uppercase tracking-wider">Pontuação Total</div>
-            <div className="text-2xl font-black text-red-600">{calcTotal()} <span className="text-sm font-normal text-slate-500">pts</span></div>
+        <div className="flex items-center gap-6">
+          <div className="flex items-center gap-3 bg-slate-50 p-2 pr-4 rounded-full border border-slate-100">
+            <div className="w-16 h-16 relative">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={chartData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={22}
+                    outerRadius={30}
+                    startAngle={90}
+                    endAngle={-270}
+                    paddingAngle={0}
+                    dataKey="value"
+                    stroke="none"
+                  >
+                    <Cell fill="#dc2626" />
+                    <Cell fill="#e2e8f0" />
+                  </Pie>
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-[10px] font-bold text-slate-700">{Math.round((totalPoints / targetPoints) * 100)}%</span>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Pontuação Total</div>
+              <div className="flex items-baseline gap-1">
+                <span className="text-xl font-black text-red-600">{totalPoints}</span>
+                <span className="text-xs font-bold text-slate-400">/ {targetPoints} pts</span>
+              </div>
+            </div>
           </div>
+
           {locked ? (
             <div className="px-4 py-2 bg-red-100 text-red-800 rounded-md font-bold text-sm border border-red-200">
               Edição Encerrada
@@ -247,7 +376,7 @@ export function CurriculoCandidato({ candidato }: CurriculoCandidatoProps) {
       <div className={`space-y-10 ${locked ? 'pointer-events-none opacity-80' : ''}`}>
         <section>
           <h3 className="font-bold text-lg text-slate-800 mb-4 border-b border-slate-100 pb-2">Identificação</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-sm bg-slate-50 p-4 rounded-xl border border-slate-100 mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 text-sm bg-slate-50 p-4 rounded-xl border border-slate-100 mb-4">
             <div>
               <span className="block text-xs font-semibold text-slate-500 uppercase">Nome</span>
               <span className="font-medium text-slate-800">{candidato.nome}</span>
@@ -261,21 +390,39 @@ export function CurriculoCandidato({ candidato }: CurriculoCandidatoProps) {
               <span className="font-medium text-slate-800">{candidato.zempo || '-'}</span>
             </div>
             <div>
+              <span className="block text-xs font-semibold text-slate-500 uppercase">Graduação Atual</span>
+              <span className="font-medium text-slate-800">
+                {tableName === 'avaliadores' 
+                  ? (candidato.graduacao || '-') 
+                  : (candidato.grau_atual || '-')}
+              </span>
+            </div>
+            <div>
               <span className="block text-xs font-semibold text-slate-500 uppercase">Grau Pretendido</span>
-              <span className="font-medium text-slate-800">{candidato.grau_pretendido || '-'}</span>
+              <span className="font-bold text-red-700">{grauEfetivo || '-'}</span>
             </div>
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="border rounded-xl p-4 shadow-sm bg-slate-50 border-slate-200">
+              <label className="block text-xs font-bold text-slate-800 mb-1">Data da Última Avaliação</label>
+              <input 
+                type="date" 
+                className="w-full p-2 border rounded bg-white text-sm focus:ring-2 focus:ring-red-500 outline-none font-semibold text-slate-800" 
+                value={data.dataUltimaAvaliacao || ''} 
+                onChange={(e) => handleLastEvalChange(e.target.value)} 
+              />
+              <p className="text-[10px] text-slate-500 mt-1">Usado para calcular a carência mínima.</p>
+            </div>
             <div className="border rounded-xl p-4 shadow-sm bg-slate-50 border-slate-200">
               <label className="block text-xs font-bold text-slate-800 mb-1">Ano do Exame (Análise)</label>
               <input type="number" className="w-full p-2 border rounded bg-white text-sm focus:ring-2 focus:ring-red-500 outline-none font-semibold text-slate-800" value={data.anoExame || ''} onChange={(e) => setData({...data, anoExame: e.target.value})} />
-              <p className="text-[10px] text-slate-500 mt-1">Altere se o currículo for referente a anos anteriores.</p>
+              <p className="text-[10px] text-slate-500 mt-1">Ano pretendido para a nova graduação.</p>
             </div>
             <div className="border rounded-xl p-4 shadow-sm bg-slate-50 border-slate-200">
-              <label className="block text-xs font-bold text-slate-800 mb-1">Período de Carência do Candidato</label>
+              <label className="block text-xs font-bold text-slate-800 mb-1">Período de Carência</label>
               <input type="text" className="w-full p-2 border rounded bg-slate-200 text-sm font-semibold text-slate-700 outline-none" readOnly value={`${carenciaAnosNum} Ano(s) (Válido de ${anoExameNum - carenciaAnosNum + 1} a ${anoExameNum})`} />
-              <p className="text-[10px] text-red-600 font-semibold mt-1">Atenção: Eventos fora deste período terão a pontuação zerada automaticamente (exceto o item 7).</p>
+              <p className="text-[10px] text-red-600 font-semibold mt-1">Atenção: Eventos fora deste período terão a pontuação zerada automaticamente.</p>
             </div>
           </div>
         </section>

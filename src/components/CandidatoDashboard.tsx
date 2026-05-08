@@ -16,9 +16,13 @@ interface CandidatoDashboardProps {
   modulos: any[];
   orgSettings?: { nome: string, logo_url: string | null, cor_primaria: string } | null;
   onDownloadCertificate?: (modulo: any, participante: any) => void;
+  onShowToast?: (text: string, type: 'error' | 'success' | 'info') => void;
 }
 
-export function CandidatoDashboard({ candidato, onLogout, resultados, aggregatedResultados, modulos, orgSettings, onDownloadCertificate }: CandidatoDashboardProps) {
+export function CandidatoDashboard({ 
+  candidato, onLogout, resultados, aggregatedResultados, modulos, 
+  orgSettings, onDownloadCertificate, onShowToast 
+}: CandidatoDashboardProps) {
   // Para ouvintes, a aba inicial depende do tipo de inscrição
   const initialTab = candidato.role === 'ouvinte' 
     ? (candidato.tipo_inscricao === 'curso' ? 'cursos' : 'resultados')
@@ -583,7 +587,7 @@ export function CandidatoDashboard({ candidato, onLogout, resultados, aggregated
         )}
 
         {activeTab === 'curriculo' && (
-          <CurriculoCandidato candidato={candidato} />
+          <CurriculoCandidato candidato={candidato} onShowToast={onShowToast} />
         )}
         
         {activeTab === 'provas' && (

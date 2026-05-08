@@ -14,6 +14,7 @@ import { RealizarProva } from './components/RealizarProva';
 import { ActionModal } from './components/ActionModal';
 import { LoginScreen } from './components/LoginScreen';
 import { CandidatoDashboard } from './components/CandidatoDashboard';
+import { CurriculoCandidato } from './components/CurriculoCandidato';
 import { SuperAdminPanel } from './components/SuperAdminPanel';
 import { FrequenciaModulo } from './components/FrequenciaModulo';
 import { CursosAdmin } from './components/CursosAdmin';
@@ -510,6 +511,64 @@ export default function App() {
   });
   const cacheLoadedRef = useRef<string | null>(null);
 
+  // Improved user enrichment function
+  const enrichUserProfile = async (userProfile: any) => {
+    if (!userProfile) return null;
+    
+    const mappedProfile = {
+      ...userProfile,
+      auth_id: userProfile.auth_id || userProfile.id,
+      id: userProfile.reference_id || userProfile.id,
+      role: userProfile.role
+    };
+
+    let finalRole = mappedProfile.role;
+    
+    if (finalRole === 'candidato') {
+      const { data: candData } = await supabase.from('candidatos').select('*').eq('id', mappedProfile.id).single();
+      if (candData) {
+        Object.assign(mappedProfile, candData);
+      }
+    } else if (finalRole !== 'ouvinte' && finalRole) {
+      let { data: avalData } = await supabase.from('avaliadores').select('*').eq('id', mappedProfile.id).single();
+      
+      if (!avalData && (mappedProfile.nome || mappedProfile.email)) {
+         // Try search by name first
+         if (mappedProfile.nome) {
+            const { data: avalByName } = await supabase.from('avaliadores')
+               .select('*')
+               .ilike('nome', mappedProfile.nome.trim())
+               .limit(1);
+            if (avalByName && avalByName.length > 0) avalData = avalByName[0];
+         }
+         
+         // If still not found, try by email if available
+         if (!avalData && mappedProfile.email) {
+            const { data: avalByEmail } = await supabase.from('avaliadores')
+               .select('*')
+               .ilike('email', mappedProfile.email.trim())
+               .limit(1);
+            if (avalByEmail && avalByEmail.length > 0) avalData = avalByEmail[0];
+         }
+
+         if (avalData) {
+           // Crucial: Update the ID to the one in the table if it's different from auth ID
+           mappedProfile.id = avalData.id;
+         }
+      }
+
+      if (avalData) {
+        Object.assign(mappedProfile, avalData);
+        if (avalData.funcao === 'avaliador_convidado') {
+          finalRole = 'avaliador_convidado';
+          mappedProfile.role = 'avaliador_convidado';
+        }
+      }
+    }
+    
+    return { profile: mappedProfile, role: finalRole };
+  };
+
   // Load session on mount
   useEffect(() => {
     const savedSession = localStorage.getItem('judo_tech_session');
@@ -520,17 +579,20 @@ export default function App() {
           setLoggedUser(user);
           setLoggedRole(role);
           
-          // Re-fetch in background to update role if it changed (e.g. to avaliador_convidado)
-          if (role === 'avaliador' || role === 'avaliador_convidado' || role === 'coordenador') {
-             supabase.from('usuarios').select('role').eq('id', user.id).single().then(({data}) => {
-                if (data && data.role && data.role !== role) {
-                   setLoggedRole(data.role);
-                   // Update user object too if role changed
-                   setLoggedUser((prev: any) => prev ? { ...prev, role: data.role } : prev);
+          // Re-fetch in background to update profile with latest data (e.g. graduacao)
+          const refreshProfile = async () => {
+             const userIdToFetch = user.auth_id || user.id;
+             const { data: updatedProfile } = await supabase.from('usuarios').select('*').eq('id', userIdToFetch).single();
+             if (updatedProfile) {
+                const enriched = await enrichUserProfile(updatedProfile);
+                if (enriched) {
+                   setLoggedUser(enriched.profile);
+                   setLoggedRole(enriched.role);
                 }
-             });
-          }
-          
+             }
+          };
+          refreshProfile();
+
           if (role === 'candidato') {
             setMainTab('realizar_prova');
             setCurrentView('realizar_prova');
@@ -1517,34 +1579,23 @@ export default function App() {
           .eq('id', user.id)
           .single();
 
-        if (profileError) throw profileError;
+          if (profileError) throw profileError;
 
         if (userProfile) {
-          const mappedProfile = {
-            ...userProfile,
-            auth_id: userProfile.id,
-            id: userProfile.reference_id || userProfile.id,
-            role: userProfile.role // Ensuring it's explicit
-          };
-          
-          // Force check if it's an avaliador_convidado even if role in usuarios is just 'avaliador'
-          // although we are now syncing them in updateAvaliadorDB
-          let finalRole = mappedProfile.role;
-          if (finalRole === 'avaliador' || finalRole === 'avaliador_convidado') {
-             const { data: avalData } = await supabase.from('avaliadores').select('funcao').eq('id', mappedProfile.id).single();
-             if (avalData?.funcao === 'avaliador_convidado') {
-                finalRole = 'avaliador_convidado';
-                mappedProfile.role = 'avaliador_convidado';
-             }
+          const enriched = await enrichUserProfile(userProfile);
+          if (!enriched) {
+             setLoginError('Erro ao processar perfil do usuário.');
+             setIsLoggingIn(false);
+             return;
           }
 
-          setLoggedUser(mappedProfile);
-          setLoggedRole(finalRole);
-          if (finalRole === 'candidato') {
+          setLoggedUser(enriched.profile);
+          setLoggedRole(enriched.role);
+          if (enriched.role === 'candidato') {
             setMainTab('realizar_prova');
             setCurrentView('realizar_prova');
-          } else if (mappedProfile.role === 'ouvinte') {
-            if (mappedProfile.tipo_inscricao === 'curso') {
+          } else if (enriched.profile.role === 'ouvinte') {
+            if (enriched.profile.tipo_inscricao === 'curso') {
               setMainTab('cursos');
               setCurrentView('cursos');
             } else {
@@ -1552,7 +1603,7 @@ export default function App() {
               setCurrentView('resultados');
             }
           } else {
-            setSelectedAvaliadorId(mappedProfile.id);
+            setSelectedAvaliadorId(enriched.profile.id);
             setMainTab('avaliacao');
             setCurrentView('avaliacao');
           }
@@ -1574,29 +1625,20 @@ export default function App() {
           .single();
           
         if (fallbackUser && !fallbackError) {
-          const mappedProfile = {
-            ...fallbackUser,
-            auth_id: fallbackUser.id,
-            id: fallbackUser.reference_id || fallbackUser.id,
-            role: fallbackUser.role
-          };
-
-          let finalRole = mappedProfile.role;
-          if (finalRole === 'avaliador' || finalRole === 'avaliador_convidado') {
-             const { data: avalData } = await supabase.from('avaliadores').select('funcao').eq('id', mappedProfile.id).single();
-             if (avalData?.funcao === 'avaliador_convidado') {
-                finalRole = 'avaliador_convidado';
-                mappedProfile.role = 'avaliador_convidado';
-             }
+          const enriched = await enrichUserProfile(fallbackUser);
+          if (!enriched) {
+             setLoginError('Erro ao processar perfil do usuário (fallback).');
+             setIsLoggingIn(false);
+             return;
           }
 
-          setLoggedUser(mappedProfile);
-          setLoggedRole(finalRole);
-          if (finalRole === 'candidato') {
+          setLoggedUser(enriched.profile);
+          setLoggedRole(enriched.role);
+          if (enriched.role === 'candidato') {
             setMainTab('realizar_prova');
             setCurrentView('realizar_prova');
-          } else if (mappedProfile.role === 'ouvinte') {
-            if (mappedProfile.tipo_inscricao === 'curso') {
+          } else if (enriched.profile.role === 'ouvinte') {
+            if (enriched.profile.tipo_inscricao === 'curso') {
               setMainTab('cursos');
               setCurrentView('cursos');
             } else {
@@ -1604,7 +1646,7 @@ export default function App() {
               setCurrentView('resultados');
             }
           } else {
-            setSelectedAvaliadorId(mappedProfile.id);
+            setSelectedAvaliadorId(enriched.profile.id);
             setMainTab('avaliacao');
             setCurrentView('avaliacao');
           }
@@ -3500,6 +3542,7 @@ export default function App() {
       modulos={modulos}
       orgSettings={orgSettings} 
       onDownloadCertificate={handleDownloadModuloCertificate}
+      onShowToast={showToast}
     />;
   }
 
@@ -3588,6 +3631,15 @@ export default function App() {
                   style={mainTab === 'resultados' ? { color: orgSettings?.cor_primaria || '#b91c1c' } : {}}
                 >
                   <FileText className="w-4 h-4" /> Resultados
+                </button>
+              )}
+              {loggedRole !== 'avaliador_convidado' && (
+                <button 
+                  onClick={() => { setMainTab('curriculo'); setCurrentView('curriculo'); }}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${mainTab === 'curriculo' ? 'bg-white shadow-sm' : 'text-white/80 hover:bg-white/10'}`}
+                  style={mainTab === 'curriculo' ? { color: orgSettings?.cor_primaria || '#b91c1c' } : {}}
+                >
+                  <Award className="w-4 h-4" /> Currículo
                 </button>
               )}
               {isUserAdmin(loggedUser) && (
@@ -5415,6 +5467,16 @@ export default function App() {
 
         {/* VIEW: RESULTADOS */}
         {mainTab === 'resultados' && loggedRole !== 'avaliador_convidado' && renderResultados()}
+
+        {loggedRole !== 'avaliador_convidado' && mainTab === 'curriculo' && (
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 animate-in fade-in">
+            <CurriculoCandidato 
+              candidato={loggedUser} 
+              tableName="avaliadores"
+              onShowToast={showToast}
+            />
+          </div>
+        )}
 
         {isUserAdmin(loggedUser) && mainTab === 'cursos' && loggedRole !== 'avaliador_convidado' && (
           <CursosAdmin />

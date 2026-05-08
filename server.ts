@@ -221,8 +221,23 @@ async function startServer() {
 
   const distPath = path.resolve(__dirname, "dist");
   if (fs.existsSync(distPath)) {
-    app.use(express.static(distPath));
+    // Servir arquivos estÃ¡ticos com cache curto, exceto index.html
+    app.use(express.static(distPath, {
+      maxAge: '1h',
+      setHeaders: (res, path) => {
+        if (path.endsWith('index.html')) {
+          res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+          res.setHeader('Pragma', 'no-cache');
+          res.setHeader('Expires', '0');
+          res.setHeader('Surrogate-Control', 'no-store');
+        }
+      }
+    }));
+    
     app.get("*", (req, res) => {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       res.sendFile(path.resolve(distPath, "index.html"));
     });
   } else {

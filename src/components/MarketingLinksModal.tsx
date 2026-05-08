@@ -43,10 +43,10 @@ export const MarketingLinksModal: React.FC<MarketingLinksModalProps> = ({ isOpen
           <button onClick={onClose}><X className="text-slate-400" /></button>
         </div>
 
-        <div className="space-y-4">
+        <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
           {links.map(link => (
-            <div key={link.id} className="p-3 border rounded-lg flex items-center justify-between">
-              <span className="text-sm font-medium">{link.label}</span>
+            <div key={link.id} className="p-3 border rounded-lg flex items-center justify-between hover:bg-slate-50 transition-colors">
+              <span className="text-sm font-medium pr-4">{link.label}</span>
               <button 
                 onClick={() => copyToClipboard(link.url, link.id)}
                 className="p-2 text-slate-500 hover:text-blue-600"

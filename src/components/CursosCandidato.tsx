@@ -11,6 +11,8 @@ const getFormattedVideoUrl = (url: string) => {
   let formattedUrl = url;
   if (formattedUrl.includes('youtube.com/watch?v=')) {
     formattedUrl = formattedUrl.replace('watch?v=', 'embed/');
+  } else if (formattedUrl.includes('youtube.com/live/')) {
+    formattedUrl = formattedUrl.replace('youtube.com/live/', 'youtube.com/embed/');
   } else if (formattedUrl.includes('youtu.be/')) {
     formattedUrl = formattedUrl.replace('youtu.be/', 'youtube.com/embed/');
   }
@@ -225,17 +227,30 @@ export function CursosCandidato({ previewCourseId, isGestor, userRole: initialUs
       try {
         const { data: userProfile } = await supabase
           .from('usuarios')
-          .select('nome')
+          .select('nome, role')
           .eq('id', userData.user.id)
           .maybeSingle();
         
         if (userProfile && userProfile.nome) {
-          // Extrair o primeiro nome
-          userName = userProfile.nome.split(' ')[0];
+          const role = userProfile.role || userRole;
+          const isStaff = role === 'avaliador' || role === 'avaliador_convidado' || role === 'admin' || role === 'gestor' || role === 'coordenador';
+          
+          if (isStaff) {
+            userName = userProfile.nome;
+          } else {
+            userName = userProfile.nome.split(' ')[0];
+          }
         } else {
-          // Extrair o primeiro nome do metadata se existir
+          // Extrair o primeiro nome do metadata se existir como fallback para não-staff
           if (userData?.user?.user_metadata?.nome) {
-            userName = userData.user.user_metadata.nome.split(' ')[0];
+            const role = userRole;
+            const isStaff = role === 'avaliador' || role === 'avaliador_convidado' || role === 'admin' || role === 'gestor' || role === 'coordenador';
+            
+            if (isStaff) {
+               userName = userData.user.user_metadata.nome;
+            } else {
+               userName = userData.user.user_metadata.nome.split(' ')[0];
+            }
           }
         }
       } catch (err) {

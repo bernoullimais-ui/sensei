@@ -17,6 +17,8 @@ const getFormattedVideoUrl = (url: string) => {
   let formattedUrl = url;
   if (formattedUrl.includes('youtube.com/watch?v=')) {
     formattedUrl = formattedUrl.replace('watch?v=', 'embed/');
+  } else if (formattedUrl.includes('youtube.com/live/')) {
+    formattedUrl = formattedUrl.replace('youtube.com/live/', 'youtube.com/embed/');
   } else if (formattedUrl.includes('youtu.be/')) {
     formattedUrl = formattedUrl.replace('youtu.be/', 'youtube.com/embed/');
   }
@@ -86,15 +88,15 @@ export function CursosAdmin() {
       try {
         const { data: userProfile } = await supabase
           .from('usuarios')
-          .select('nome')
+          .select('nome, role')
           .eq('id', userData.user.id)
           .maybeSingle();
         
         if (userProfile && userProfile.nome) {
-          userName = userProfile.nome.split(' ')[0] + ' (Professor)';
+          userName = userProfile.nome + ' (Professor)';
         } else {
           if (userData?.user?.user_metadata?.nome) {
-            userName = userData.user.user_metadata.nome.split(' ')[0] + ' (Professor)';
+            userName = userData.user.user_metadata.nome + ' (Professor)';
           }
         }
       } catch (err) {
