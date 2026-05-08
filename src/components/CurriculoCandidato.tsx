@@ -49,7 +49,9 @@ export function CurriculoCandidato({ candidato, tableName = 'candidatos', onShow
 
   // Derived state calculations (moved to top)
   const anoExameNum = Number(data.anoExame || new Date().getFullYear());
-  const grauEfetivo = data.grauPretendido || (tableName === 'avaliadores' ? getNextDan(candidato.graduacao) : candidato.grau_pretendido);
+  const currentGrad = candidato.graduacao || candidato.grau_atual;
+  const nextDanCalculated = getNextDan(currentGrad || '');
+  const grauEfetivo = data.grauPretendido || nextDanCalculated;
   const carenciaAnosNum = getCarenciaAnos(grauEfetivo || '');
   const targetPoints = getRequiredPoints(grauEfetivo || '');
 
@@ -74,19 +76,16 @@ export function CurriculoCandidato({ candidato, tableName = 'candidatos', onShow
   // Sync data with enriched candidato info
   useEffect(() => {
     if (candidato?.id) {
-      if (tableName === 'avaliadores' && candidato.graduacao) {
-        const nextDan = getNextDan(candidato.graduacao);
-        // If data.grauPretendido is not set or it's the "1º Dan" default while we have a better guess
-        if (!data.grauPretendido || (data.grauPretendido === '1º Dan' && nextDan !== '1º Dan')) {
-          setData(prev => ({ ...prev, grauPretendido: nextDan }));
-        }
-      } else if (tableName === 'candidatos' && candidato.grau_pretendido) {
-        if (!data.grauPretendido || data.grauPretendido === '1º Dan') {
-          setData(prev => ({ ...prev, grauPretendido: candidato.grau_pretendido }));
-        }
+      const currentGrad = candidato.graduacao || candidato.grau_atual;
+      const nextDan = getNextDan(currentGrad);
+      
+      // Automatically set the intended degree to the next one if it hasn't been specifically saved yet
+      // or if it's the default "1º Dan" and we know a better one.
+      if (!data.grauPretendido || (data.grauPretendido === '1º Dan' && nextDan !== '1º Dan')) {
+        setData(prev => ({ ...prev, grauPretendido: nextDan }));
       }
     }
-  }, [candidato?.graduacao, candidato?.grau_pretendido, candidato?.id, tableName]);
+  }, [candidato?.graduacao, candidato?.grau_atual, candidato?.id]);
 
   // Auto-calculate anoExame based on dataUltimaAvaliacao and carencia
   useEffect(() => {
@@ -125,11 +124,8 @@ export function CurriculoCandidato({ candidato, tableName = 'candidatos', onShow
         
         // Enrichment if not set in JSON
         if (!finalGrauPretendido) {
-           if (tableName === 'avaliadores' && candidato?.graduacao) {
-             finalGrauPretendido = getNextDan(candidato.graduacao);
-           } else if (tableName === 'candidatos' && candidato?.grau_pretendido) {
-             finalGrauPretendido = candidato.grau_pretendido;
-           }
+           const currentGrad = candidato?.graduacao || candidato?.grau_atual;
+           finalGrauPretendido = getNextDan(currentGrad || '');
         }
 
         setData((prev: any) => ({
@@ -142,12 +138,8 @@ export function CurriculoCandidato({ candidato, tableName = 'candidatos', onShow
         }));
       } else {
         // Defaults for first time
-        let defaultGrau = '1º Dan';
-        if (tableName === 'avaliadores' && candidato?.graduacao) {
-           defaultGrau = getNextDan(candidato.graduacao);
-        } else if (tableName === 'candidatos' && candidato?.grau_pretendido) {
-           defaultGrau = candidato.grau_pretendido;
-        }
+        const currentGrad = candidato?.graduacao || candidato?.grau_atual;
+        const defaultGrau = getNextDan(currentGrad || '');
 
         setData(prev => ({
           ...prev,

@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import { Search, User, FileText, ExternalLink, ArrowLeft, UserCircle, Award } from 'lucide-react';
 import { CensoPerfil } from './CensoPerfil';
 import { CurriculoCandidato } from './CurriculoCandidato';
+import { getNextDan } from './CurriculoCandidato.utils';
 
 interface PerfisAdminProps {
   loggedUser: any;
@@ -66,7 +67,7 @@ export function PerfisAdmin({ loggedUser, showToast }: PerfisAdminProps) {
             </button>
             <div>
               <h2 className="text-lg font-bold text-slate-900">{selectedCandidate.nome}</h2>
-              <p className="text-sm text-slate-500">{selectedCandidate.grau_pretendido} • {selectedCandidate.dojo}</p>
+              <p className="text-sm text-slate-500">{getNextDan(selectedCandidate.grau_atual || selectedCandidate.graduacao)} • {selectedCandidate.dojo}</p>
             </div>
           </div>
           <div className="flex gap-2">
@@ -150,8 +151,8 @@ export function PerfisAdmin({ loggedUser, showToast }: PerfisAdminProps) {
                       <div className="text-xs text-slate-500">ID: {c.id.substring(0, 8)}</div>
                     </td>
                     <td className="p-4">
-                      <span className="px-2 py-1 bg-red-50 text-red-700 rounded-md text-xs font-bold border border-red-100">
-                        {c.grau_pretendido}
+                      <span className="px-2 py-1 bg-red-50 text-red-700 rounded-md text-xs font-bold border border-red-100" title={`Graduação Atual: ${c.grau_atual || c.graduacao || '?'}`}>
+                        {getNextDan(c.grau_atual || c.graduacao)}
                       </span>
                     </td>
                     <td className="p-4 text-slate-600 text-sm">
