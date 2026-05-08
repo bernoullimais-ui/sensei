@@ -221,7 +221,7 @@ async function startServer() {
 
   const distPath = path.resolve(process.cwd(), "dist");
   if (fs.existsSync(distPath)) {
-    // Servir arquivos estÃ¡ticos com cache curto, exceto index.html
+    // Servir arquivos estáticos com cache curto, exceto index.html
     app.use(express.static(distPath, {
       maxAge: '1h',
       setHeaders: (res, path) => {
@@ -248,13 +248,17 @@ async function startServer() {
     app.use(vite.middlewares);
   }
 
-  if (process.env.NODE_ENV !== "production" || !process.env.VERCEL) {
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`Server running on http://localhost:${PORT}`);
-    });
-  }
+  return app;
 }
 
-startServer();
+const appPromise = startServer();
+
+if (process.env.NODE_ENV !== "production" || !process.env.VERCEL) {
+  appPromise.then(configuredApp => {
+    configuredApp.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  });
+}
 
 export default app;

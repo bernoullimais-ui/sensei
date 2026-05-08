@@ -10,6 +10,9 @@
     "preview": "vite preview",
     "lint": "tsc --noEmit"
   },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "@google/genai": "^1.29.0",
     "@hello-pangea/dnd": "^18.0.1",
