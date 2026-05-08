@@ -219,7 +219,7 @@ async function startServer() {
     }
   });
 
-  const distPath = path.resolve(__dirname, "dist");
+  const distPath = path.resolve(process.cwd(), "dist");
   if (fs.existsSync(distPath)) {
     // Servir arquivos estÃ¡ticos com cache curto, exceto index.html
     app.use(express.static(distPath, {
