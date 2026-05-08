@@ -403,17 +403,7 @@ export function CurriculoCandidato({ candidato, tableName = 'candidatos', onShow
             </div>
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="border rounded-xl p-4 shadow-sm bg-slate-50 border-slate-200">
-              <label className="block text-xs font-bold text-slate-800 mb-1">Data da Última Avaliação</label>
-              <input 
-                type="date" 
-                className="w-full p-2 border rounded bg-white text-sm focus:ring-2 focus:ring-red-500 outline-none font-semibold text-slate-800" 
-                value={data.dataUltimaAvaliacao || ''} 
-                onChange={(e) => handleLastEvalChange(e.target.value)} 
-              />
-              <p className="text-[10px] text-slate-500 mt-1">Usado para calcular a carência mínima.</p>
-            </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="border rounded-xl p-4 shadow-sm bg-slate-50 border-slate-200">
               <label className="block text-xs font-bold text-slate-800 mb-1">Ano do Exame (Análise)</label>
               <input type="number" className="w-full p-2 border rounded bg-white text-sm focus:ring-2 focus:ring-red-500 outline-none font-semibold text-slate-800" value={data.anoExame || ''} onChange={(e) => setData({...data, anoExame: e.target.value})} />
