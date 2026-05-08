@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { PlayCircle, Clock, Award, ChevronRight, FileText, CheckCircle, ChevronLeft, Calendar, Maximize2, RefreshCcw, Info, ChevronDown, ChevronUp, Video, Check, X, MessageSquare, Download, List } from 'lucide-react';
+import { PlayCircle, Clock, Award, ChevronRight, FileText, CheckCircle, ChevronLeft, Calendar, Maximize2, RefreshCcw, Info, ChevronDown, ChevronUp, Video, Check, X, MessageSquare, Download, List, Users } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { generateCertificatePDF } from '../lib/certificateUtils';
 import Markdown from 'react-markdown';
@@ -56,6 +56,7 @@ export function CursosCandidato({ previewCourseId, isGestor, userRole: initialUs
   // Chat states
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [chatInput, setChatInput] = useState('');
+  const [participantCount, setParticipantCount] = useState<number>(0);
   
   // Attendance states
   const [attendanceWindow, setAttendanceWindow] = useState<{ active: boolean, expiresAt: number | null }>({ active: false, expiresAt: null });
@@ -175,7 +176,7 @@ export function CursosCandidato({ previewCourseId, isGestor, userRole: initialUs
         loadQuizQuestions();
       }
       
-      // Setup chat for live lesson
+      // Setup chat and presence for live lesson
       if (selectedLesson.tipo === 'ao_vivo') {
       const channel = supabase.channel(`live_chat_${selectedLesson._calculatedId}`)
         .on('broadcast', { event: 'new_message' }, payload => {
@@ -184,7 +185,20 @@ export function CursosCandidato({ previewCourseId, isGestor, userRole: initialUs
         .on('broadcast', { event: 'release_attendance' }, payload => {
           setAttendanceWindow({ active: true, expiresAt: payload.payload.expiresAt });
         })
-        .subscribe();
+        .on('presence', { event: 'sync' }, () => {
+          const newState = channel.presenceState();
+          // Count unique users across all connections
+          const count = Object.keys(newState).length;
+          setParticipantCount(count);
+        })
+        .subscribe(async (status) => {
+          if (status === 'SUBSCRIBED') {
+            await channel.track({
+              user_id: currentUserId || 'anonymous',
+              online_at: new Date().toISOString(),
+            });
+          }
+        });
         
       return () => {
         supabase.removeChannel(channel);
@@ -1039,8 +1053,14 @@ export function CursosCandidato({ previewCourseId, isGestor, userRole: initialUs
                       
                       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <div className="lg:col-span-2 bg-slate-50 rounded-xl border border-slate-200 flex flex-col overflow-hidden" style={{ minHeight: '400px', maxHeight: '500px' }}>
-                          <div className="bg-white border-b border-slate-200 p-4">
+                          <div className="bg-white border-b border-slate-200 p-4 flex justify-between items-center">
                              <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2"><MessageSquare className="w-4 h-4 text-blue-600"/> Chat ao vivo</h3>
+                             {participantCount > 0 && (
+                               <div className="flex items-center gap-1.5 px-2 py-1 bg-green-50 text-green-700 rounded-lg border border-green-100 text-[10px] font-bold">
+                                 <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
+                                 {participantCount} {participantCount === 1 ? 'Participante' : 'Participantes'}
+                               </div>
+                             )}
                           </div>
                           <div className="flex-1 overflow-y-auto p-4 space-y-4">
                              <div className="text-center text-xs text-slate-400 my-4">O chat foi iniciado. Seja respeitoso e siga as diretrizes.</div>

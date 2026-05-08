@@ -23,6 +23,7 @@ import ValidacaoCertificado from './components/ValidacaoCertificado';
 import { addToSyncQueue, processSyncQueue, getSyncQueue } from './lib/offlineSync';
 import { 
   User, 
+  UserCircle,
   Award, 
   Activity, 
   BookOpen, 
@@ -63,10 +64,12 @@ import {
   Share2
 } from 'lucide-react';
 
+import { PerfisAdmin } from './components/PerfisAdmin';
+
 type Dan = 'Shodan (1º Dan)' | 'Nidan (2º Dan)' | 'Sandan (3º Dan)' | 'Yondan (4º Dan)' | 'Godan (5º Dan)';
 type PhaseStatus = 'AVALIAR' | 'Realizada' | 'Parcialmente Realizada' | 'Não Realizada' | 'Ótimo' | 'Bom' | 'Regular';
 type HighDanScore = 'AVALIAR' | 'Ótimo' | 'Bom' | 'Regular' | '';
-type ViewState = 'avaliacao' | 'candidatos' | 'avaliadores' | 'tecnicas' | 'katas' | 'resultados' | 'avaliacoes_teoricas' | 'treinamento' | 'contatos' | 'banco_questoes' | 'provas_teoricas' | 'realizar_prova' | 'curriculo' | 'cursos' | 'organizacao';
+type ViewState = 'avaliacao' | 'candidatos' | 'avaliadores' | 'tecnicas' | 'katas' | 'resultados' | 'avaliacoes_teoricas' | 'treinamento' | 'contatos' | 'banco_questoes' | 'provas_teoricas' | 'realizar_prova' | 'curriculo' | 'cursos' | 'organizacao' | 'perfis_candidatos';
 
 interface Organizacao {
   id: string;
@@ -316,7 +319,7 @@ export default function App() {
   }, []);
 
   const [currentView, setCurrentView] = useState<ViewState>('avaliacao');
-  const [mainTab, setMainTab] = useState<'avaliacao' | 'configuracao' | 'resultados' | 'treinamento' | 'contatos' | 'super_admin' | 'realizar_prova' | 'curriculo' | 'cursos'>('avaliacao');
+  const [mainTab, setMainTab] = useState<'avaliacao' | 'configuracao' | 'resultados' | 'treinamento' | 'contatos' | 'super_admin' | 'realizar_prova' | 'curriculo' | 'cursos' | 'perfis_candidatos'>('avaliacao');
   
   // Filtros para Resultados das Avaliações
   const [filtroModulo, setFiltroModulo] = useState('');
@@ -3728,6 +3731,15 @@ export default function App() {
               )}
               {isUserAdmin(loggedUser) && (
                 <button 
+                  onClick={() => { setMainTab('perfis_candidatos'); setCurrentView('perfis_candidatos'); }}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${mainTab === 'perfis_candidatos' ? 'bg-white shadow-sm' : 'text-white/80 hover:bg-white/10'}`}
+                  style={mainTab === 'perfis_candidatos' ? { color: orgSettings?.cor_primaria || '#b91c1c' } : {}}
+                >
+                  <UserCircle className="w-4 h-4" /> Perfil
+                </button>
+              )}
+              {isUserAdmin(loggedUser) && (
+                <button 
                   onClick={() => { setMainTab('contatos'); setCurrentView('contatos'); }}
                   className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${mainTab === 'contatos' ? 'bg-white shadow-sm' : 'text-white/80 hover:bg-white/10'}`}
                   style={mainTab === 'contatos' ? { color: orgSettings?.cor_primaria || '#b91c1c' } : {}}
@@ -4354,6 +4366,11 @@ export default function App() {
         {/* VIEW: PROVAS TEÓRICAS */}
         {isUserAdmin(loggedUser) && mainTab === 'configuracao' && currentView === 'provas_teoricas' && (
           <ProvasTeoricasAdmin loggedUser={loggedUser} />
+        )}
+
+        {/* VIEW: PERFIS CANDIDATOS */}
+        {isUserAdmin(loggedUser) && mainTab === 'perfis_candidatos' && (
+          <PerfisAdmin loggedUser={loggedUser} showToast={showToast} />
         )}
 
         {/* VIEW: REALIZAR PROVA (CANDIDATO) */}
