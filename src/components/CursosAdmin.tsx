@@ -46,6 +46,8 @@ export function CursosAdmin() {
 
   const [availableQuestions, setAvailableQuestions] = useState<any[]>([]);
   const [isSelectQuestionsModalOpen, setIsSelectQuestionsModalOpen] = useState(false);
+  const [quizFilterTema, setQuizFilterTema] = useState('');
+  const [quizFilterDificuldade, setQuizFilterDificuldade] = useState('');
 
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [chatInput, setChatInput] = useState('');
@@ -2384,7 +2386,10 @@ export function CursosAdmin() {
                                   <span className="font-semibold text-slate-400 min-w-[24px]">{idx + 1}.</span>
                                   <div>
                                     <p className="text-slate-800 font-medium line-clamp-1">{qInfo?.texto || 'Questão não encontrada'}</p>
-                                    <p className="text-xs text-slate-500 mt-1 capitalize">Nível: {qInfo?.nivel || 'N/A'}</p>
+                                    <div className="flex gap-2 mt-1">
+                                      <p className="text-[10px] text-slate-500 font-medium">Dificuldade: {qInfo?.dificuldade || 'N/A'}</p>
+                                      {qInfo?.tema && <p className="text-[10px] text-slate-500 font-medium border-l border-slate-300 pl-2">Tema: {qInfo.tema}</p>}
+                                    </div>
                                   </div>
                                 </div>
                                 <button 
@@ -3343,6 +3348,32 @@ export function CursosAdmin() {
                 <X className="w-5 h-5 text-blue-500" />
               </button>
             </div>
+
+            <div className="px-6 py-4 bg-slate-50 border-b border-slate-100 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Filtrar por Tema</label>
+                <input 
+                  type="text" 
+                  value={quizFilterTema}
+                  onChange={e => setQuizFilterTema(e.target.value)}
+                  placeholder="Ex: História, Arbitragem..."
+                  className="w-full p-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Filtrar por Nível</label>
+                <select 
+                  value={quizFilterDificuldade}
+                  onChange={e => setQuizFilterDificuldade(e.target.value)}
+                  className="w-full p-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                >
+                  <option value="">Todos os Níveis</option>
+                  <option value="Fácil">Fácil</option>
+                  <option value="Médio">Médio</option>
+                  <option value="Difícil">Difícil</option>
+                </select>
+              </div>
+            </div>
             
             <div className="p-6 overflow-y-auto flex-1 space-y-4">
               {availableQuestions.length === 0 ? (
@@ -3351,7 +3382,13 @@ export function CursosAdmin() {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {availableQuestions.map(q => {
+                  {availableQuestions
+                    .filter(q => {
+                      const temaMatch = !quizFilterTema || (q.tema && q.tema.toLowerCase().includes(quizFilterTema.toLowerCase()));
+                      const dificuldadeMatch = !quizFilterDificuldade || q.dificuldade === quizFilterDificuldade;
+                      return temaMatch && dificuldadeMatch;
+                    })
+                    .map(q => {
                     const isSelected = (editingStep.questoes_ids || []).includes(q.id);
                     return (
                       <div 
@@ -3370,8 +3407,14 @@ export function CursosAdmin() {
                         <div>
                           <p className={`font-medium ${isSelected ? 'text-blue-900' : 'text-slate-800'}`}>{q.texto}</p>
                           <div className="flex gap-2 mt-2">
-                            <span className="text-xs px-2 py-1 bg-white border border-slate-200 rounded text-slate-600 capitalize">Nível: {q.nivel || 'N/A'}</span>
-                            <span className="text-xs px-2 py-1 bg-white border border-slate-200 rounded text-slate-600">Categoria: {q.categoria || 'N/A'}</span>
+                            <span className={`text-[10px] px-2 py-0.5 font-bold uppercase rounded border ${
+                              q.dificuldade === 'Difícil' ? 'bg-red-50 text-red-700 border-red-100' : 
+                              q.dificuldade === 'Fácil' ? 'bg-green-50 text-green-700 border-green-100' : 
+                              'bg-orange-50 text-orange-700 border-orange-100'
+                            }`}>Nível: {q.dificuldade || 'Médio'}</span>
+                            {q.tema && (
+                              <span className="text-[10px] px-2 py-0.5 bg-blue-50 text-blue-700 font-bold uppercase rounded border border-blue-100">Tema: {q.tema}</span>
+                            )}
                           </div>
                         </div>
                       </div>
