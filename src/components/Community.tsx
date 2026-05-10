@@ -125,7 +125,27 @@ export const Community: React.FC<CommunityProps> = ({ loggedUser, orgSettings })
   }, [messages, myId]);
 
   const filteredUsers = useMemo(() => {
-    let users = [...availableUsers];
+    // Collect all unique user IDs from messages
+    const allRelevantUsersMap = new Map<string, UserSummary>();
+    
+    // 1. First, populate with available users from the organization
+    availableUsers.forEach(u => {
+      allRelevantUsersMap.set(u.id, u);
+    });
+
+    // 2. Then, ensure anyone we've exchanged messages with is also included
+    messages.forEach(m => {
+      const otherId = m.sender_id === myId ? m.receiver_id : m.sender_id;
+      const otherNome = m.sender_id === myId ? m.receiver_nome : m.sender_nome;
+      const otherRole = m.sender_id === myId ? '' : m.sender_role;
+      
+      if (!allRelevantUsersMap.has(otherId)) {
+        allRelevantUsersMap.set(otherId, { id: otherId, nome: otherNome, role: otherRole });
+      }
+    });
+
+    let users = Array.from(allRelevantUsersMap.values());
+
     if (userSearchQuery.trim()) {
       const query = userSearchQuery.toLowerCase();
       users = users.filter(u => 
@@ -138,9 +158,12 @@ export const Community: React.FC<CommunityProps> = ({ loggedUser, orgSettings })
     return users.sort((a, b) => {
       const dateA = messagesState.lastMsgMap[a.id] || '0';
       const dateB = messagesState.lastMsgMap[b.id] || '0';
-      return new Date(dateB).getTime() - new Date(dateA).getTime();
+      if (dateA !== dateB) {
+        return new Date(dateB).getTime() - new Date(dateA).getTime();
+      }
+      return (a.nome || "").localeCompare(b.nome || "");
     });
-  }, [availableUsers, userSearchQuery, messagesState]);
+  }, [availableUsers, userSearchQuery, messagesState, messages, myId]);
 
   const isGestor = useMemo(() => {
     return loggedUser.role === 'admin' || 
@@ -292,12 +315,18 @@ export const Community: React.FC<CommunityProps> = ({ loggedUser, orgSettings })
         setPosts(prev => prev.map(p => p.id === newComm.post_id ? { ...p, comments_count: (p.comments_count || 0) + 1 } : p));
       })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'community_messages' }, (payload) => {
+        console.log('Realtime DM Insert:', payload);
         const newMsg = payload.new as DirectMessage;
         if (newMsg.sender_id === myId || newMsg.receiver_id === myId) {
           setMessages(prev => {
             if (prev.find(m => m.id === newMsg.id)) return prev;
             return [...prev, newMsg];
           });
+          
+          // Auto-select and mark as read if it's from the person I'm currently chatting with
+          if (newMsg.sender_id === selectedRecipientId && document.visibilityState === 'visible') {
+            markAsRead(selectedRecipientId);
+          }
         }
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'community_messages' }, (payload) => {
@@ -411,18 +440,15 @@ export const Community: React.FC<CommunityProps> = ({ loggedUser, orgSettings })
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Sessão expirada. Faça login novamente.');
 
-      console.log('Tentando excluir postagem:', postId);
-      const { error, count, data } = await supabase
+      const { error, count } = await supabase
         .from('community_posts')
         .delete({ count: 'exact' })
         .eq('id', postId);
       
-      console.log('Resultado do delete:', { error, count, data });
-
       if (error) throw error;
 
       if (count === 0) {
-        throw new Error('Você não tem permissão para excluir esta postagem ou ela já foi removida (count: 0).');
+        throw new Error('Você não tem permissão para excluir esta postagem ou ela já foi removida.');
       }
       
       // Update local state
@@ -443,17 +469,15 @@ export const Community: React.FC<CommunityProps> = ({ loggedUser, orgSettings })
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Sessão expirada.');
 
-      console.log('Tentando excluir mensagem:', messageId);
-      const { error, count, data } = await supabase
+      const { error, count } = await supabase
         .from('community_messages')
         .delete({ count: 'exact' })
         .eq('id', messageId);
 
-      console.log('Resultado delete mensagem:', { error, count, data });
       if (error) throw error;
       
       if (count === 0) {
-        throw new Error('Sem permissão para excluir esta mensagem (count: 0).');
+        throw new Error('Sem permissão para excluir esta mensagem.');
       }
       
       setMessages(prev => prev.filter(m => m.id !== messageId));
