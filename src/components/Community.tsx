@@ -411,15 +411,18 @@ export const Community: React.FC<CommunityProps> = ({ loggedUser, orgSettings })
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Sessão expirada. Faça login novamente.');
 
-      const { error, count } = await supabase
+      console.log('Tentando excluir postagem:', postId);
+      const { error, count, data } = await supabase
         .from('community_posts')
         .delete({ count: 'exact' })
         .eq('id', postId);
       
+      console.log('Resultado do delete:', { error, count, data });
+
       if (error) throw error;
 
       if (count === 0) {
-        throw new Error('Você não tem permissão para excluir esta postagem ou ela já foi removida.');
+        throw new Error('Você não tem permissão para excluir esta postagem ou ela já foi removida (count: 0).');
       }
       
       // Update local state
@@ -440,15 +443,17 @@ export const Community: React.FC<CommunityProps> = ({ loggedUser, orgSettings })
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Sessão expirada.');
 
-      const { error, count } = await supabase
+      console.log('Tentando excluir mensagem:', messageId);
+      const { error, count, data } = await supabase
         .from('community_messages')
         .delete({ count: 'exact' })
         .eq('id', messageId);
 
+      console.log('Resultado delete mensagem:', { error, count, data });
       if (error) throw error;
       
       if (count === 0) {
-        throw new Error('Sem permissão para excluir esta mensagem.');
+        throw new Error('Sem permissão para excluir esta mensagem (count: 0).');
       }
       
       setMessages(prev => prev.filter(m => m.id !== messageId));
