@@ -65,11 +65,13 @@ import {
 } from 'lucide-react';
 
 import { PerfisAdmin } from './components/PerfisAdmin';
+import { Community } from './components/Community';
+import { MessagesSquare } from 'lucide-react';
 
 type Dan = 'Shodan (1º Dan)' | 'Nidan (2º Dan)' | 'Sandan (3º Dan)' | 'Yondan (4º Dan)' | 'Godan (5º Dan)';
 type PhaseStatus = 'AVALIAR' | 'Realizada' | 'Parcialmente Realizada' | 'Não Realizada' | 'Ótimo' | 'Bom' | 'Regular';
 type HighDanScore = 'AVALIAR' | 'Ótimo' | 'Bom' | 'Regular' | '';
-type ViewState = 'avaliacao' | 'candidatos' | 'avaliadores' | 'tecnicas' | 'katas' | 'resultados' | 'avaliacoes_teoricas' | 'treinamento' | 'contatos' | 'banco_questoes' | 'provas_teoricas' | 'realizar_prova' | 'curriculo' | 'cursos' | 'organizacao' | 'perfis_candidatos';
+type ViewState = 'avaliacao' | 'comunidade' | 'candidatos' | 'avaliadores' | 'tecnicas' | 'katas' | 'resultados' | 'avaliacoes_teoricas' | 'treinamento' | 'contatos' | 'banco_questoes' | 'provas_teoricas' | 'realizar_prova' | 'curriculo' | 'cursos' | 'organizacao' | 'perfis_candidatos' | 'configuracao' | 'super_admin';
 
 interface Organizacao {
   id: string;
@@ -320,7 +322,7 @@ export default function App() {
   }, []);
 
   const [currentView, setCurrentView] = useState<ViewState>('avaliacao');
-  const [mainTab, setMainTab] = useState<'avaliacao' | 'configuracao' | 'resultados' | 'treinamento' | 'contatos' | 'super_admin' | 'realizar_prova' | 'curriculo' | 'cursos' | 'perfis_candidatos'>('avaliacao');
+  const [mainTab, setMainTab] = useState<ViewState>('avaliacao');
   
   // Filtros para Resultados das Avaliações
   const [filtroModulo, setFiltroModulo] = useState('');
@@ -3758,6 +3760,13 @@ export default function App() {
                   <ShieldCheck className="w-4 h-4" /> Super Admin
                 </button>
               )}
+              <button 
+                onClick={() => { setMainTab('comunidade'); setCurrentView('comunidade' as any); }}
+                className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${mainTab === 'comunidade' ? 'bg-white shadow-sm' : 'text-white/80 hover:bg-white/10'}`}
+                style={mainTab === 'comunidade' ? { color: orgSettings?.cor_primaria || '#b91c1c' } : {}}
+              >
+                <MessagesSquare className="w-4 h-4" /> Comunidade
+              </button>
             </div>
 
             <button 
@@ -5596,6 +5605,10 @@ export default function App() {
 
         {loggedUser?.is_super_admin && mainTab === 'super_admin' && (
           <SuperAdminPanel />
+        )}
+
+        {mainTab === 'comunidade' && (
+          <Community loggedUser={loggedUser} orgSettings={orgSettings} />
         )}
 
       </main>

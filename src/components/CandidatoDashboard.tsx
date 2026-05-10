@@ -1,10 +1,25 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { CheckSquare, FileText, LogOut, TrendingUp, Award, Calendar, ChevronRight, Loader2, BookOpen, User, PlayCircle, Download } from 'lucide-react';
+import { 
+  CheckSquare, 
+  FileText, 
+  LogOut, 
+  TrendingUp, 
+  Award, 
+  Calendar, 
+  ChevronRight, 
+  Loader2, 
+  BookOpen, 
+  User, 
+  PlayCircle, 
+  Download, 
+  MessagesSquare 
+} from 'lucide-react';
 import { CertificateTemplate } from './CertificateDesigner';
 import { RealizarProva } from './RealizarProva';
 import { CurriculoCandidato } from './CurriculoCandidato';
 import { CensoPerfil } from './CensoPerfil';
 import { CursosCandidato } from './CursosCandidato';
+import { Community } from './Community';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
 import { supabase } from '../lib/supabase';
 
@@ -28,7 +43,7 @@ export function CandidatoDashboard({
     ? (candidato.tipo_inscricao === 'curso' ? 'cursos' : 'resultados')
     : 'perfil';
     
-  const [activeTab, setActiveTab] = useState<'provas' | 'resultados' | 'curriculo' | 'perfil' | 'cursos'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'provas' | 'resultados' | 'curriculo' | 'perfil' | 'cursos' | 'comunidade'>(initialTab);
   const [selectedEval, setSelectedEval] = useState<any | null>(null);
   const [detailedData, setDetailedData] = useState<{waza: any[], kata: any[], kihon: any[]}>({ waza: [], kata: [], kihon: [] });
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
@@ -568,6 +583,12 @@ export function CandidatoDashboard({
                   <PlayCircle className="w-4 h-4" /> Cursos
                 </button>
               )}
+              <button 
+                onClick={() => setActiveTab('comunidade')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'comunidade' ? 'bg-white text-red-700 shadow-sm' : 'text-red-100 hover:bg-red-700'}`}
+              >
+                <MessagesSquare className="w-4 h-4" /> Comunidade
+              </button>
             </div>
 
             <button 
@@ -600,6 +621,10 @@ export function CandidatoDashboard({
         
         {activeTab === 'cursos' && (
           <CursosCandidato userRole={candidato.role} />
+        )}
+
+        {activeTab === 'comunidade' && (
+          <Community loggedUser={candidato} orgSettings={orgSettings} />
         )}
       </main>
     </div>

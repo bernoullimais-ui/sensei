@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Users, BarChart2, BookOpen, Clock, Lock, PlayCircle, Plus, Eye, Share2, Download, Search, Filter, MoreHorizontal, MessageSquare, Award, CheckCircle, ChevronLeft, Calendar, FileText, Gift, DollarSign, Loader2, Image as ImageIcon, Minus, Code, Video as VideoIcon, ShoppingBag, CalendarCheck, List, Paperclip, Volume2, Pencil, Trash2, Check, X, Table, Bold, Italic, Underline, ListOrdered, GripVertical } from 'lucide-react';
+import { Settings, Users, BarChart2, BookOpen, Clock, Lock, PlayCircle, Plus, Eye, Share2, Download, Search, Filter, MoreHorizontal, MessageSquare, Award, CheckCircle, ChevronLeft, Calendar, FileText, Gift, DollarSign, Loader2, Image as ImageIcon, Minus, Code, Video as VideoIcon, ShoppingBag, CalendarCheck, List, Paperclip, Volume2, Pencil, Trash2, Check, X, Table, Bold, Italic, Underline, ListOrdered, GripVertical, AlertTriangle } from 'lucide-react';
 import { motion, Reorder } from 'motion/react';
 import { MarketingLinksModal } from './MarketingLinksModal';
 import { PricingConfigModal } from './PricingConfigModal';
@@ -220,10 +220,42 @@ export function CursosAdmin() {
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    
+    // Compression logic
     const reader = new FileReader();
     reader.onload = (event) => {
-      const dataUrl = event.target?.result as string;
-      applyCommand('insertHTML', `<br/><img src="${dataUrl}" alt="${file.name}" style="max-width: 100%; border-radius: 0.5rem; margin-top: 1rem; margin-bottom: 1rem;" /><br/>`);
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        
+        // Max dimensions
+        const MAX_WIDTH = 1200;
+        const MAX_HEIGHT = 1200;
+        
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+        
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+        
+        // Export to base64 with 0.7 quality
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        applyCommand('insertHTML', `<br/><img src="${dataUrl}" alt="${file.name}" style="max-width: 100%; border-radius: 0.5rem; margin-top: 1rem; margin-bottom: 1rem;" /><br/>`);
+      };
+      img.src = event.target?.result as string;
     };
     reader.readAsDataURL(file);
     e.target.value = '';
@@ -315,17 +347,44 @@ export function CursosAdmin() {
   };
 
   const saveCurriculo = async (newSections: any[]) => {
-    if (!createdCourseId) return;
+    if (!createdCourseId) return false;
+    
+    // Check payload size
+    const payloadSize = JSON.stringify(newSections).length;
+    const sizeInMB = payloadSize / 1024 / 1024;
+    
+    if (sizeInMB > 8) {
+      alert(`⚠️ ERRO CRÍTICO: O currículo está pesado demais (${sizeInMB.toFixed(2)} MB).\n\nO limite máximo recomendado é 2 MB. Remova imagens coladas diretamente no texto ou reduza o conteúdo antes de tentar salvar novamente.`);
+      return false;
+    }
+
+    if (sizeInMB > 2) {
+       console.warn(`Curriculum size is large: ${sizeInMB.toFixed(2)}MB`);
+    }
+
     try {
+      setIsSaving(true);
       const { error } = await supabase
         .from('cursos')
         .update({ curriculo_json: newSections })
         .eq('id', createdCourseId);
       if (error) {
         console.error('Error saving curriculum:', error);
+        
+        if (error.code === '57014' || error.message.includes('timeout')) {
+          alert('Erro de tempo limite: O currículo está muito grande para salvar. Isso geralmente acontece quando há muitas imagens pesadas coladas no texto. Tente remover imagens grandes e salvar novamente.');
+        } else {
+          alert('Erro ao salvar no banco de dados: ' + error.message);
+        }
+        return false;
       }
-    } catch (err) {
+      return true;
+    } catch (err: any) {
       console.error('Failed to save curriculum:', err);
+      alert('Falha crítica ao salvar: ' + err.message);
+      return false;
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -379,7 +438,7 @@ export function CursosAdmin() {
     setIsLoading(true);
     try {
       const [{ data: cursosData, error: cursosError }, { data: trilhasData, error: trilhasError }] = await Promise.all([
-        supabase.from('cursos').select('*').order('ordem', { ascending: true, nullsFirst: false }),
+        supabase.from('cursos').select('id, nome, preco, status, ordem, created_at, thumbnail_url, professor_nome, carga_horaria').order('ordem', { ascending: true, nullsFirst: false }),
         supabase.from('trilhas').select('*').order('ordem', { ascending: true, nullsFirst: false })
       ]);
 
@@ -645,29 +704,69 @@ export function CursosAdmin() {
                       </td>
                       {item.type === 'curso' ? (
                         <>
-                          <td className="px-6 py-4 font-medium text-slate-900" onClick={() => { 
-                            setCreatedCourseName(item.nome); 
-                            setCreatedCourseId(item.id); 
-                            setSections(item.curriculo_json || []);
-                            setView('course_dashboard'); 
+                          <td className="px-6 py-4 font-medium text-slate-900" onClick={async () => { 
+                            setIsLoading(true);
+                            try {
+                              const { data, error } = await supabase.from('cursos').select('curriculo_json').eq('id', item.id).single();
+                              if (error) throw error;
+                              setCreatedCourseName(item.nome); 
+                              setCreatedCourseId(item.id); 
+                              setSections(data.curriculo_json || []);
+                              setView('course_dashboard'); 
+                            } catch (err) {
+                              console.error('Error fetching curriculum:', err);
+                              alert('Erro ao carregar o conteúdo do curso. Tente novamente.');
+                            } finally {
+                              setIsLoading(false);
+                            }
                           }}>{item.nome}</td>
-                          <td className="px-6 py-4 text-slate-600" onClick={() => { 
-                            setCreatedCourseName(item.nome); 
-                            setCreatedCourseId(item.id); 
-                            setSections(item.curriculo_json || []);
-                            setView('course_dashboard'); 
+                          <td className="px-6 py-4 text-slate-600" onClick={async () => { 
+                            setIsLoading(true);
+                            try {
+                              const { data, error } = await supabase.from('cursos').select('curriculo_json').eq('id', item.id).single();
+                              if (error) throw error;
+                              setCreatedCourseName(item.nome); 
+                              setCreatedCourseId(item.id); 
+                              setSections(data.curriculo_json || []);
+                              setView('course_dashboard'); 
+                            } catch (err) {
+                              console.error('Error fetching curriculum:', err);
+                              alert('Erro ao carregar o conteúdo do curso. Tente novamente.');
+                            } finally {
+                              setIsLoading(false);
+                            }
                           }}>0</td>
-                          <td className="px-6 py-4 text-slate-600 capitalize" onClick={() => { 
-                            setCreatedCourseName(item.nome); 
-                            setCreatedCourseId(item.id); 
-                            setSections(item.curriculo_json || []);
-                            setView('course_dashboard'); 
+                          <td className="px-6 py-4 text-slate-600 capitalize" onClick={async () => { 
+                            setIsLoading(true);
+                            try {
+                              const { data, error } = await supabase.from('cursos').select('curriculo_json').eq('id', item.id).single();
+                              if (error) throw error;
+                              setCreatedCourseName(item.nome); 
+                              setCreatedCourseId(item.id); 
+                              setSections(data.curriculo_json || []);
+                              setView('course_dashboard'); 
+                            } catch (err) {
+                              console.error('Error fetching curriculum:', err);
+                              alert('Erro ao carregar o conteúdo do curso. Tente novamente.');
+                            } finally {
+                              setIsLoading(false);
+                            }
                           }}>{item.preco || 'Gratuito'}</td>
-                          <td className="px-6 py-4" onClick={() => { 
-                            setCreatedCourseName(item.nome); 
-                            setCreatedCourseId(item.id); 
-                            setSections(item.curriculo_json || []);
-                            setView('course_dashboard'); 
+                          <td className="px-6 py-4" onClick={async () => { 
+                            setIsLoading(true);
+                            try {
+                              const { data, error } = await supabase.from('cursos').select('curriculo_json').eq('id', item.id).single();
+                              if (error) throw error;
+                              setCreatedCourseName(item.nome); 
+                              setCreatedCourseId(item.id); 
+                              setSections(data.curriculo_json || []);
+                              setView('course_dashboard'); 
+                            } catch (err) {
+                              console.error('Error fetching curriculum:', err);
+                              alert('Erro ao carregar o conteúdo do curso. Tente novamente.');
+                            } finally {
+                              setIsLoading(false);
+                            }
                           }}>
                             <span className={`px-2 py-1 rounded text-xs font-semibold ${item.status === 'Publicado' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-700'}`}>{item.status || 'Rascunho'}</span>
                           </td>
@@ -1296,7 +1395,35 @@ export function CursosAdmin() {
         )}
 
         {activeTab === 'conteudo' && viewConteudo === 'list' && (
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm min-h-[400px]">
+          <>
+            {(() => {
+              const currentSize = JSON.stringify(sections).length;
+              if (currentSize < 1 * 1024 * 1024) return null;
+              
+              const isCritical = currentSize > 5 * 1024 * 1024;
+              return (
+                <div className={`mb-6 p-4 rounded-xl flex items-start gap-4 animate-in fade-in slide-in-from-top-2 border ${
+                  isCritical 
+                    ? 'bg-red-50 text-red-800 border-red-200' 
+                    : 'bg-amber-50 text-amber-800 border-amber-200'
+                }`}>
+                  <AlertTriangle className={`w-6 h-6 shrink-0 ${isCritical ? 'text-red-600' : 'text-amber-600'}`} />
+                  <div>
+                    <h4 className="font-bold text-sm mb-1 uppercase tracking-wider">
+                      {isCritical ? '⚠️ Conteúdo Muito Pesado' : 'Atenção com o tamanho do curso'}
+                    </h4>
+                    <p className="text-sm opacity-90 leading-relaxed">
+                      O currículo atual tem **{(currentSize / 1024 / 1024).toFixed(2)} MB**. 
+                      {isCritical 
+                        ? ' Este tamanho impede o salvamento no banco de dados. Você provavelmente colou imagens pesadas no texto. Remova-as para conseguir salvar.' 
+                        : ' Acima de 5 MB você terá problemas ao salvar. Evite embutir imagens pesadas diretamente nos campos de texto.'}
+                    </p>
+                  </div>
+                </div>
+              );
+            })()}
+
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm min-h-[400px]">
             <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-white sticky top-0 z-10">
                <h3 className="font-bold text-xl text-slate-900">Conteúdo</h3>
                <button 
@@ -1558,11 +1685,12 @@ export function CursosAdmin() {
               </div>
             )}
           </div>
-        )}
+        </>
+      )}
 
         {viewConteudo === 'edit_section' && (
           <div className="fixed inset-0 bg-slate-100 z-50 flex flex-col overflow-y-auto">
-             <div className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10 sticky top-0">
+             <div className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10">
                <div className="flex items-center gap-4">
                  <button onClick={() => setViewConteudo('list')} className="text-blue-600 hover:bg-slate-50 p-2 rounded-full transition-colors">
                    <ChevronLeft className="w-6 h-6" />
@@ -1574,22 +1702,25 @@ export function CursosAdmin() {
                    Cancelar
                  </button>
                  <button 
-                   disabled={editingSection.nome.trim() === ''}
-                   onClick={() => {
+                   disabled={editingSection.nome.trim() === '' || isSaving}
+                   onClick={async () => {
+                     let newSecs;
                      if (editingSection.id) {
-                       const newSecs = sections.map(s => s.id === editingSection.id ? { ...s, ...editingSection } : s);
-                       setSections(newSecs);
-                       saveCurriculo(newSecs);
+                       newSecs = sections.map(s => s.id === editingSection.id ? { ...s, ...editingSection } : s);
                      } else {
-                       const newSecs = [...sections, { id: Date.now().toString(), ...editingSection, etapas: [] }];
-                       setSections(newSecs);
-                       saveCurriculo(newSecs);
+                       newSecs = [...sections, { id: Date.now().toString(), ...editingSection, etapas: [] }];
                      }
-                     setViewConteudo('list');
+                     
+                     setSections(newSecs);
+                     const success = await saveCurriculo(newSecs);
+                     if (success) {
+                       setViewConteudo('list');
+                     }
                    }}
-                   className={`px-8 py-2 rounded-full font-medium text-white transition-colors ${editingSection.nome.trim() === '' ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
+                   className={`px-8 py-2 rounded-full font-medium text-white transition-all flex items-center gap-2 ${editingSection.nome.trim() === '' || isSaving ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 shadow-md active:scale-95'}`}
                  >
-                   Salvar
+                   {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                   {isSaving ? 'Salvando...' : 'Salvar Seção'}
                  </button>
                </div>
              </div>
@@ -1684,34 +1815,45 @@ export function CursosAdmin() {
                    Cancelar
                  </button>
                  <button 
-                   disabled={editingStep.nome.trim() === ''}
-                   onClick={() => {
-                     // Save step logic
-                     const newSecs = [...sections];
-                     const sectionIdx = newSecs.findIndex(s => s.id === editingStep.secaoId);
-                     if (sectionIdx !== -1) {
-                       const stepId = editingStep.id || Date.now().toString();
+                   disabled={editingStep.nome.trim() === '' || isSaving}
+                   onClick={async () => {
+                     const stepId = editingStep.id || Date.now().toString();
+                     
+                     const newSecs = sections.map(sec => {
+                       let etapas = [...(sec.etapas || [])];
                        
-                       // Remove from old section if moved
-                       newSecs.forEach((sec) => {
-                         if (sec.etapas) {
-                           sec.etapas = sec.etapas.filter((e: any) => e.id !== stepId);
+                       if (sec.id === editingStep.secaoId) {
+                         const stepData = { 
+                           id: stepId, 
+                           nome: editingStep.nome, 
+                           tipo: editingStep.tipo, 
+                           url_video: editingStep.url_video, 
+                           descricao: editingStep.descricao, 
+                           tempo_video: editingStep.tempo_video 
+                         };
+                         
+                         if (etapas.some(e => e.id === stepId)) {
+                            etapas = etapas.map(e => e.id === stepId ? stepData : e);
+                         } else {
+                            etapas.push(stepData);
                          }
-                       });
-
-                       // Add/replace in new section
-                       const newEtapas = [...(newSecs[sectionIdx].etapas || [])];
-                       newEtapas.push({ id: stepId, nome: editingStep.nome, tipo: editingStep.tipo, url_video: editingStep.url_video, descricao: editingStep.descricao, tempo_video: editingStep.tempo_video });
-                       newSecs[sectionIdx].etapas = newEtapas;
+                       } else {
+                         etapas = etapas.filter(e => e.id !== stepId);
+                       }
                        
-                       setSections(newSecs);
-                       saveCurriculo(newSecs);
+                       return { ...sec, etapas };
+                     });
+                     
+                     setSections(newSecs);
+                     const success = await saveCurriculo(newSecs);
+                     if (success) {
+                       setViewConteudo('list');
                      }
-                     setViewConteudo('list');
                    }}
-                   className={`px-8 py-2 rounded-full font-medium text-white transition-colors ${editingStep.nome.trim() === '' ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
+                   className={`px-8 py-2 rounded-full font-medium text-white transition-all flex items-center gap-2 ${editingStep.nome.trim() === '' || isSaving ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 shadow-md active:scale-95'}`}
                  >
-                   Salvar
+                   {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                   {isSaving ? 'Salvando...' : 'Salvar Etapa'}
                  </button>
                </div>
              </div>
@@ -1892,37 +2034,44 @@ export function CursosAdmin() {
                    Cancelar
                  </button>
                  <button 
-                   disabled={editingStep.nome.trim() === ''}
-                   onClick={() => {
-                     const newSecs = [...sections];
-                     const sectionIdx = newSecs.findIndex(s => s.id === editingStep.secaoId);
-                     if (sectionIdx !== -1) {
-                       const stepId = editingStep.id || Date.now().toString();
+                   disabled={editingStep.nome.trim() === '' || isSaving}
+                   onClick={async () => {
+                     const stepId = editingStep.id || Date.now().toString();
+                     
+                     const newSecs = sections.map(sec => {
+                       let etapas = [...(sec.etapas || [])];
                        
-                       newSecs.forEach((sec) => {
-                         if (sec.etapas) {
-                           sec.etapas = sec.etapas.filter((e: any) => e.id !== stepId);
+                       if (sec.id === editingStep.secaoId) {
+                         const stepData = { 
+                           id: stepId, 
+                           nome: editingStep.nome, 
+                           tipo: editingStep.tipo, 
+                           descricao: editingStep.descricao,
+                           videos: editingStep.videos 
+                         };
+                         
+                         if (etapas.some(e => e.id === stepId)) {
+                            etapas = etapas.map(e => e.id === stepId ? stepData : e);
+                         } else {
+                            etapas.push(stepData);
                          }
-                       });
-
-                       const newEtapas = [...(newSecs[sectionIdx].etapas || [])];
-                       newEtapas.push({ 
-                         id: stepId, 
-                         nome: editingStep.nome, 
-                         tipo: editingStep.tipo, 
-                         descricao: editingStep.descricao,
-                         videos: editingStep.videos 
-                       });
-                       newSecs[sectionIdx].etapas = newEtapas;
+                       } else {
+                         etapas = etapas.filter(e => e.id !== stepId);
+                       }
                        
-                       setSections(newSecs);
-                       saveCurriculo(newSecs);
+                       return { ...sec, etapas };
+                     });
+                     
+                     setSections(newSecs);
+                     const success = await saveCurriculo(newSecs);
+                     if (success) {
+                       setViewConteudo('list');
                      }
-                     setViewConteudo('list');
                    }}
-                   className={`px-8 py-2 rounded-full font-medium text-white transition-colors ${editingStep.nome.trim() === '' ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
+                   className={`px-8 py-2 rounded-full font-medium text-white transition-all flex items-center gap-2 ${editingStep.nome.trim() === '' || isSaving ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 shadow-md active:scale-95'}`}
                  >
-                   Salvar
+                   {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                   {isSaving ? 'Salvando...' : 'Salvar Etapa'}
                  </button>
                </div>
              </div>
@@ -2068,34 +2217,45 @@ export function CursosAdmin() {
                    Cancelar
                  </button>
                  <button 
-                   disabled={editingStep.nome.trim() === ''}
-                   onClick={() => {
-                     // Save step logic
-                     const newSecs = [...sections];
-                     const sectionIdx = newSecs.findIndex(s => s.id === editingStep.secaoId);
-                     if (sectionIdx !== -1) {
-                       const stepId = editingStep.id || Date.now().toString();
+                   disabled={editingStep.nome.trim() === '' || isSaving}
+                   onClick={async () => {
+                     const stepId = editingStep.id || Date.now().toString();
+                     
+                     const newSecs = sections.map(sec => {
+                       let etapas = [...(sec.etapas || [])];
                        
-                       // Remove from old section if moved
-                       newSecs.forEach((sec) => {
-                         if (sec.etapas) {
-                           sec.etapas = sec.etapas.filter((e: any) => e.id !== stepId);
+                       if (sec.id === editingStep.secaoId) {
+                         const stepData = { 
+                           id: stepId, 
+                           nome: editingStep.nome, 
+                           tipo: editingStep.tipo, 
+                           url_video: editingStep.url_video, 
+                           descricao: editingStep.descricao, 
+                           tempo_video: editingStep.tempo_video 
+                         };
+                         
+                         if (etapas.some(e => e.id === stepId)) {
+                           etapas = etapas.map(e => e.id === stepId ? stepData : e);
+                         } else {
+                           etapas.push(stepData);
                          }
-                       });
-
-                       // Add/replace in new section
-                       const newEtapas = [...(newSecs[sectionIdx].etapas || [])];
-                       newEtapas.push({ id: stepId, nome: editingStep.nome, tipo: editingStep.tipo, url_video: editingStep.url_video, descricao: editingStep.descricao, tempo_video: editingStep.tempo_video });
-                       newSecs[sectionIdx].etapas = newEtapas;
+                       } else {
+                         etapas = etapas.filter(e => e.id !== stepId);
+                       }
                        
-                       setSections(newSecs);
-                       saveCurriculo(newSecs);
+                       return { ...sec, etapas };
+                     });
+                     
+                     setSections(newSecs);
+                     const success = await saveCurriculo(newSecs);
+                     if (success) {
+                       setViewConteudo('list');
                      }
-                     setViewConteudo('list');
                    }}
-                   className={`px-8 py-2 rounded-full font-medium text-white transition-colors ${editingStep.nome.trim() === '' ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
+                   className={`px-8 py-2 rounded-full font-medium text-white transition-all flex items-center gap-2 ${editingStep.nome.trim() === '' || isSaving ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 shadow-md active:scale-95'}`}
                  >
-                   Salvar
+                   {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                   {isSaving ? 'Salvando...' : 'Salvar Etapa'}
                  </button>
                </div>
              </div>
@@ -2292,33 +2452,43 @@ export function CursosAdmin() {
                    Cancelar
                  </button>
                  <button 
-                   disabled={editingStep.nome.trim() === ''}
-                   onClick={() => {
-                     const newSecs = [...sections];
-                     const sectionIdx = newSecs.findIndex(s => s.id === editingStep.secaoId);
-                     if (sectionIdx !== -1) {
-                       const stepId = editingStep.id || Date.now().toString();
+                   disabled={editingStep.nome.trim() === '' || isSaving}
+                   onClick={async () => {
+                     const stepId = editingStep.id || Date.now().toString();
+                     
+                     const newSecs = sections.map(sec => {
+                       let etapas = [...(sec.etapas || [])];
                        
-                       // Remove from old section if moved
-                       newSecs.forEach((sec) => {
-                         if (sec.etapas) {
-                           sec.etapas = sec.etapas.filter((e: any) => e.id !== stepId);
+                       if (sec.id === editingStep.secaoId) {
+                         const stepData = { 
+                           id: stepId, 
+                           nome: editingStep.nome, 
+                           tipo: editingStep.tipo, 
+                           questoes_ids: editingStep.questoes_ids || [] 
+                         };
+                         
+                         if (etapas.some(e => e.id === stepId)) {
+                            etapas = etapas.map(e => e.id === stepId ? stepData : e);
+                         } else {
+                            etapas.push(stepData);
                          }
-                       });
+                       } else {
+                         etapas = etapas.filter(e => e.id !== stepId);
+                       }
+                       
+                       return { ...sec, etapas };
+                     });
 
-                       // Add/replace in new section
-                       const newEtapas = [...(newSecs[sectionIdx].etapas || [])];
-                       newEtapas.push({ id: stepId, nome: editingStep.nome, tipo: editingStep.tipo, questoes_ids: editingStep.questoes_ids || [] });
-                       newSecs[sectionIdx].etapas = newEtapas;
-
-                       setSections(newSecs);
-                       saveCurriculo(newSecs);
+                     setSections(newSecs);
+                     const success = await saveCurriculo(newSecs);
+                     if (success) {
+                       setViewConteudo('list');
                      }
-                     setViewConteudo('list');
                    }}
-                   className={`px-8 py-2 rounded-full font-medium text-white transition-colors ${editingStep.nome.trim() === '' ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
+                   className={`px-8 py-2 rounded-full font-medium text-white transition-all flex items-center gap-2 ${editingStep.nome.trim() === '' || isSaving ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 shadow-md active:scale-95'}`}
                  >
-                   Salvar
+                   {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                   {isSaving ? 'Salvando...' : 'Salvar Etapa'}
                  </button>
                </div>
              </div>
@@ -2428,33 +2598,43 @@ export function CursosAdmin() {
                    Cancelar
                  </button>
                  <button 
-                   disabled={editingStep.nome.trim() === ''}
-                   onClick={() => {
-                     const newSecs = [...sections];
-                     const sectionIdx = newSecs.findIndex(s => s.id === editingStep.secaoId);
-                     if (sectionIdx !== -1) {
-                       const stepId = editingStep.id || Date.now().toString();
+                   disabled={editingStep.nome.trim() === '' || isSaving}
+                   onClick={async () => {
+                     const stepId = editingStep.id || Date.now().toString();
+                     
+                     const newSecs = sections.map(sec => {
+                       let etapas = [...(sec.etapas || [])];
                        
-                       // Remove from old section if moved
-                       newSecs.forEach((sec) => {
-                         if (sec.etapas) {
-                           sec.etapas = sec.etapas.filter((e: any) => e.id !== stepId);
+                       if (sec.id === editingStep.secaoId) {
+                         const stepData = { 
+                           id: stepId, 
+                           nome: editingStep.nome, 
+                           tipo: editingStep.tipo, 
+                           descricao: editingStep.descricao 
+                         };
+                         
+                         if (etapas.some(e => e.id === stepId)) {
+                            etapas = etapas.map(e => e.id === stepId ? stepData : e);
+                         } else {
+                            etapas.push(stepData);
                          }
-                       });
+                       } else {
+                         etapas = etapas.filter(e => e.id !== stepId);
+                       }
+                       
+                       return { ...sec, etapas };
+                     });
 
-                       // Add/replace in new section
-                       const newEtapas = [...(newSecs[sectionIdx].etapas || [])];
-                       newEtapas.push({ id: stepId, nome: editingStep.nome, tipo: editingStep.tipo, descricao: editingStep.descricao });
-                       newSecs[sectionIdx].etapas = newEtapas;
-
-                       setSections(newSecs);
-                       saveCurriculo(newSecs);
+                     setSections(newSecs);
+                     const success = await saveCurriculo(newSecs);
+                     if (success) {
+                       setViewConteudo('list');
                      }
-                     setViewConteudo('list');
                    }}
-                   className={`px-8 py-2 rounded-full font-medium text-white transition-colors ${editingStep.nome.trim() === '' ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
+                   className={`px-8 py-2 rounded-full font-medium text-white transition-all flex items-center gap-2 ${editingStep.nome.trim() === '' || isSaving ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 shadow-md active:scale-95'}`}
                  >
-                   Salvar
+                   {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                   {isSaving ? 'Salvando...' : 'Salvar Etapa'}
                  </button>
                </div>
              </div>
@@ -3132,7 +3312,9 @@ export function CursosAdmin() {
                       fetchCursos();
                     } catch (err: any) {
                       console.error('Error updating course settings:', err);
-                      if (err.message && (err.message.includes("does not exist") || err.code === 'PGRST204' || err.message.includes("Could not find the"))) {
+                      if (err.code === '57014' || (err.message && err.message.includes('timeout'))) {
+                         alert('Erro de tempo limite: As configurações do curso estão muito grandes para salvar. Tente reduzir o texto da descrição ou remover imagens embutidas.');
+                      } else if (err.message && (err.message.includes("does not exist") || err.code === 'PGRST204' || err.message.includes("Could not find the"))) {
                         alert(`Erro no banco de dados: ${err.message}\n\nExecute no SQL Editor para adicionar a coluna faltante:\n\nALTER TABLE cursos ADD COLUMN IF NOT EXISTS thumbnail_url text;\nALTER TABLE cursos ADD COLUMN IF NOT EXISTS professor_nome text;\nALTER TABLE cursos ADD COLUMN IF NOT EXISTS professor_titulo text;\nALTER TABLE cursos ADD COLUMN IF NOT EXISTS professor_foto_url text;\nALTER TABLE cursos ADD COLUMN IF NOT EXISTS descricao text;\nALTER TABLE cursos ADD COLUMN IF NOT EXISTS carga_horaria text;\nNOTIFY pgrst, 'reload schema';`);
                       } else {
                         alert('Erro ao atualizar. Tente novamente.');
