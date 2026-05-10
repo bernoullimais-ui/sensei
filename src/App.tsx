@@ -10,6 +10,7 @@ import { InscricaoPublica } from './components/InscricaoPublica';
 import { AvaliacoesTeoricas } from './components/AvaliacoesTeoricas';
 import { BancoQuestoes } from './components/BancoQuestoes';
 import { ProvasTeoricasAdmin } from './components/ProvasTeoricasAdmin';
+import { ManagerDashboard } from './components/ManagerDashboard';
 import { RealizarProva } from './components/RealizarProva';
 import { ActionModal } from './components/ActionModal';
 import { LoginScreen } from './components/LoginScreen';
@@ -28,6 +29,7 @@ import {
   Activity, 
   BookOpen, 
   CheckCircle, 
+  AlertCircle,
   AlertTriangle, 
   XCircle, 
   Plus, 
@@ -61,7 +63,8 @@ import {
   ShieldCheck,
   WifiOff,
   CloudOff,
-  Share2
+  Share2,
+  BarChart3
 } from 'lucide-react';
 
 import { PerfisAdmin } from './components/PerfisAdmin';
@@ -71,7 +74,7 @@ import { MessagesSquare } from 'lucide-react';
 type Dan = 'Shodan (1º Dan)' | 'Nidan (2º Dan)' | 'Sandan (3º Dan)' | 'Yondan (4º Dan)' | 'Godan (5º Dan)';
 type PhaseStatus = 'AVALIAR' | 'Realizada' | 'Parcialmente Realizada' | 'Não Realizada' | 'Ótimo' | 'Bom' | 'Regular';
 type HighDanScore = 'AVALIAR' | 'Ótimo' | 'Bom' | 'Regular' | '';
-type ViewState = 'avaliacao' | 'comunidade' | 'candidatos' | 'avaliadores' | 'tecnicas' | 'katas' | 'resultados' | 'avaliacoes_teoricas' | 'treinamento' | 'contatos' | 'banco_questoes' | 'provas_teoricas' | 'realizar_prova' | 'curriculo' | 'cursos' | 'organizacao' | 'perfis_candidatos' | 'configuracao' | 'super_admin';
+type ViewState = 'dashboard' | 'avaliacao' | 'comunidade' | 'candidatos' | 'avaliadores' | 'tecnicas' | 'katas' | 'resultados' | 'avaliacoes_teoricas' | 'treinamento' | 'contatos' | 'banco_questoes' | 'provas_teoricas' | 'realizar_prova' | 'curriculo' | 'cursos' | 'organizacao' | 'perfis_candidatos' | 'configuracao' | 'super_admin';
 
 interface Organizacao {
   id: string;
@@ -358,6 +361,7 @@ export default function App() {
   const [tecnicas, setTecnicas] = useState<Tecnica[]>([]);
   const [katas, setKatas] = useState<KataDef[]>([]);
   const [modulos, setModulos] = useState<ModuloAvaliacao[]>([]);
+  const [allProvasTeoricas, setAllProvasTeoricas] = useState<any[]>([]);
   const [minhasPresencas, setMinhasPresencas] = useState<Set<string>>(new Set());
 
   const handleSaveModuloCertificate = async (template: CertificateTemplate) => {
@@ -412,6 +416,7 @@ export default function App() {
   const [resultadosTeoricos, setResultadosTeoricos] = useState<any[]>([]);
   const [resultadosProvas, setResultadosProvas] = useState<any[]>([]);
   const [isLoadingResultados, setIsLoadingResultados] = useState(false);
+  const [allModuloParticipants, setAllModuloParticipants] = useState<any[]>([]);
   
   // --- Avaliação State ---
   const [selectedModuloId, setSelectedModuloId] = useState('');
@@ -422,6 +427,10 @@ export default function App() {
 
   const [selectedCandidatoId, setSelectedCandidatoId] = useState('');
   const [selectedAvaliadorId, setSelectedAvaliadorId] = useState('');
+  const [resultadosSubTab, setResultadosSubTab] = useState<'lista' | 'acompanhamento'>('lista');
+  const [filtroAcompanhamento, setFiltroAcompanhamento] = useState('');
+  const [filtroAcompanhamentoPendentes, setFiltroAcompanhamentoPendentes] = useState(false);
+  
   const [evaluatedCandidatesIds, setEvaluatedCandidatesIds] = useState<string[]>([]);
   // Fallbacks for manual entry if not using the registered list
   const [manualCandidateName, setManualCandidateName] = useState('');
@@ -737,12 +746,13 @@ export default function App() {
     }
 
     try {
-      const [candRes, avalRes, tecRes, kataRes, modulosRes] = await Promise.all([
+      const [candRes, avalRes, tecRes, kataRes, modulosRes, provasTeoricasRes] = await Promise.all([
         supabase.from('candidatos').select('id, nome, grau_pretendido, dojo, zempo').eq('organizacao_id', orgId).order('nome', { ascending: true }),
         supabase.from('avaliadores').select('id, nome, graduacao, zempo, funcao').eq('organizacao_id', orgId).order('nome', { ascending: true }),
         supabase.from('tecnicas').select('*').eq('organizacao_id', orgId).order('nome', { ascending: true }),
         supabase.from('katas').select('*').eq('organizacao_id', orgId).order('ordem', { ascending: true }),
-        supabase.from('modulos_avaliacao').select('*').eq('organizacao_id', orgId).order('data', { ascending: true })
+        supabase.from('modulos_avaliacao').select('*').eq('organizacao_id', orgId).order('data', { ascending: true }),
+        supabase.from('provas_teoricas').select('*').eq('organizacao_id', orgId).order('created_at', { ascending: false })
       ]);
 
       if (candRes.data) setCandidatos(candRes.data);
@@ -750,6 +760,7 @@ export default function App() {
       if (tecRes.data) setTecnicas(tecRes.data);
       if (kataRes.data) setKatas(kataRes.data);
       if (modulosRes.data) setModulos(modulosRes.data);
+      if (provasTeoricasRes.data) setAllProvasTeoricas(provasTeoricasRes.data);
 
       // Fetch user presence if logged in as candidate or ouvinte
       if (loggedUser && (loggedRole === 'candidato' || loggedRole === 'ouvinte')) {
@@ -1032,10 +1043,14 @@ export default function App() {
         queryProvas = queryProvas.eq('candidato_id', loggedUser.id);
       }
 
-      const [resData, teoricasData, provasData] = await Promise.all([
+      const [resData, teoricasData, provasData, participantsData] = await Promise.all([
         query,
         queryTeoricas,
-        queryProvas
+        queryProvas,
+        supabase
+          .from('modulo_participantes')
+          .select('*')
+          .in('modulo_id', modulos.map(m => m.id))
       ]);
 
       if (resData.error) throw resData.error;
@@ -1044,9 +1059,8 @@ export default function App() {
 
       setResultados(resData.data || []);
       setResultadosTeoricos(teoricasData.data || []);
-      
-      // Armazenar os resultados das provas no estado (vamos criar esse estado)
       setResultadosProvas(provasData.data || []);
+      setAllModuloParticipants(participantsData.data || []);
     } catch (error) {
       console.error('Erro ao carregar resultados:', error);
       showToast('Erro ao carregar resultados.', 'error');
@@ -1238,7 +1252,7 @@ export default function App() {
         grau_pretendido: rt.grau_pretendido,
         modulo_id: 'teorica',
         modulo_nome: rt.modulo,
-        media_teorica: rt.media,
+        media_teorica: (rt.media || 0) * 10,
         veredito: finalVeredito,
         avaliadores_count: 1,
         isTeorica: true,
@@ -1273,6 +1287,59 @@ export default function App() {
 
     return [...praticas, ...teoricas, ...provas].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }, [resultados, resultadosTeoricos, resultadosProvas, modulos, candidatos]);
+
+  const acompanhamentoData = useMemo(() => {
+    return candidatos.map(cand => {
+      // Encontrar módulos em que o candidato é participante
+      const candModulosIds = allModuloParticipants
+        .filter(p => p.candidato_id === cand.id)
+        .map(p => p.modulo_id);
+      
+      const modulosCandidato = modulos.filter(m => candModulosIds.includes(m.id));
+      
+      const statusModulos = modulosCandidato.map(modulo => {
+        const resultado = aggregatedResultados.find(r => r.candidato_id === cand.id && r.modulo_id === modulo.id);
+        return {
+          moduloId: modulo.id,
+          tema: modulo.tema || modulo.nome,
+          data: modulo.data,
+          status: resultado ? resultado.veredito : 'Pendente',
+          nota: resultado ? (modulo.tema === 'Katas' ? (resultado.nota_kata || 0) : (resultado.percentual_waza || 0)) : null
+        };
+      });
+
+      // Também verificar provas teóricas (sistema e manual)
+      const resultadosProvasCand = resultadosProvas.filter(rp => rp.candidato_id === cand.id);
+      const statusProvasSistema = resultadosProvasCand.map(rp => ({
+        tipo: 'Sistema',
+        titulo: rp.provas_teoricas?.titulo || 'Prova Teórica',
+        status: 'Finalizada',
+        nota: rp.nota * 10
+      }));
+
+      const resultadosTeoricosCand = resultadosTeoricos.filter(rt => rt.candidato_id === cand.id);
+      const statusTeoricasManuais = resultadosTeoricosCand.map(rt => ({
+        tipo: 'Manual',
+        titulo: rt.modulo || 'Avaliação Teórica',
+        status: 'Finalizada',
+        nota: (rt.media || 0) * 10
+      }));
+
+      // Um candidato tem pendência se:
+      // 1. Algum módulo em que ele está inscrito está marcado como 'Pendente'
+      // 2. Ele não realizou todas as provas teóricas disponíveis no sistema
+      const temPendenciaModulos = statusModulos.some(s => s.status === 'Pendente');
+      const temPendenciaProvas = allProvasTeoricas.length > statusProvasSistema.length;
+      const temPendencia = temPendenciaModulos || temPendenciaProvas;
+
+      return {
+        ...cand,
+        statusModulos,
+        statusProvas: [...statusProvasSistema, ...statusTeoricasManuais],
+        temPendencia
+      };
+    });
+  }, [candidatos, modulos, aggregatedResultados, allModuloParticipants, resultadosProvas, resultadosTeoricos, allProvasTeoricas]);
 
   const filteredResultados = useMemo(() => {
     return aggregatedResultados.filter(res => {
@@ -3416,204 +3483,328 @@ export default function App() {
     );
   }
 
-  const renderResultados = () => (
-    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 animate-in fade-in">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 border-b pb-4 gap-4">
-        <h2 className="text-xl font-bold flex items-center gap-2">
-          <FileText className="w-6 h-6 text-red-600" /> Resultados das Avaliações
-        </h2>
-        <div className="flex items-center gap-2">
-          {isUserAdmin(loggedUser) && selectedResultados.size > 0 && (
+  const renderResultados = () => {
+    const filteredAcompanhamento = acompanhamentoData.filter(cand => {
+      const matchSearch = cand.nome.toLowerCase().includes(filtroAcompanhamento.toLowerCase()) || 
+                          cand.dojo.toLowerCase().includes(filtroAcompanhamento.toLowerCase());
+      const matchPendentes = !filtroAcompanhamentoPendentes || cand.temPendencia;
+      return matchSearch && matchPendentes;
+    });
+
+    return (
+      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 animate-in fade-in">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 border-b pb-4 gap-4">
+          <div className="flex flex-col gap-1">
+            <h2 className="text-xl font-bold flex items-center gap-2">
+              <Trophy className="w-6 h-6 text-red-600" /> Resultados e Acompanhamento
+            </h2>
+            <div className="flex gap-4 mt-2">
+              <button 
+                onClick={() => setResultadosSubTab('lista')}
+                className={`text-sm font-semibold pb-2 border-b-2 transition-colors ${resultadosSubTab === 'lista' ? 'border-red-600 text-red-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+              >
+                Lista de Resultados
+              </button>
+              <button 
+                onClick={() => setResultadosSubTab('acompanhamento')}
+                className={`text-sm font-semibold pb-2 border-b-2 transition-colors ${resultadosSubTab === 'acompanhamento' ? 'border-red-600 text-red-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+              >
+                Status por Candidato
+              </button>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {resultadosSubTab === 'lista' && isUserAdmin(loggedUser) && selectedResultados.size > 0 && (
+              <button 
+                onClick={() => handleDeleteResultados(Array.from(selectedResultados))}
+                className="text-sm bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1.5 rounded-md flex items-center gap-1 transition-colors"
+              >
+                <Trash2 className="w-4 h-4" /> Excluir Selecionados ({selectedResultados.size})
+              </button>
+            )}
             <button 
-              onClick={() => handleDeleteResultados(Array.from(selectedResultados))}
-              className="text-sm bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1.5 rounded-md flex items-center gap-1 transition-colors"
+              onClick={fetchResultados}
+              disabled={isLoadingResultados}
+              className="text-sm bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-md flex items-center gap-1 transition-colors disabled:opacity-50"
             >
-              <Trash2 className="w-4 h-4" /> Excluir Selecionados ({selectedResultados.size})
+              {isLoadingResultados ? 'Atualizando...' : 'Atualizar'}
             </button>
-          )}
-          <button 
-            onClick={fetchResultados}
-            disabled={isLoadingResultados}
-            className="text-sm bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-md flex items-center gap-1 transition-colors disabled:opacity-50"
-          >
-            {isLoadingResultados ? 'Atualizando...' : 'Atualizar'}
-          </button>
+          </div>
         </div>
-      </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <div>
-          <label className="block text-xs font-semibold text-slate-600 mb-1">Módulo</label>
-          <select value={filtroModulo} onChange={(e) => setFiltroModulo(e.target.value)} className="w-full p-2 text-sm border border-slate-300 rounded-md bg-white outline-none focus:ring-2 focus:ring-red-500">
-            <option value="">Todos</option>
-            {Array.from(new Set(aggregatedResultados.map(res => {
-              const modulo = modulos.find(m => m.id === res.modulo_id);
-              return res.isTeorica || res.isProvaTeorica ? res.modulo_nome : (modulo ? modulo.tema : 'Desconhecido');
-            }))).map(tema => (
-              <option key={tema} value={tema}>{tema}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs font-semibold text-slate-600 mb-1">Grau Pretendido</label>
-          <select value={filtroGrau} onChange={(e) => setFiltroGrau(e.target.value)} className="w-full p-2 text-sm border border-slate-300 rounded-md bg-white outline-none focus:ring-2 focus:ring-red-500">
-            <option value="">Todos</option>
-            {Array.from(new Set(aggregatedResultados.map(res => res.grau_pretendido))).map(grau => (
-              <option key={grau} value={grau}>{grau}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs font-semibold text-slate-600 mb-1">Candidato</label>
-          <input 
-            type="text" 
-            value={filtroCandidato} 
-            onChange={(e) => setFiltroCandidato(e.target.value)} 
-            placeholder="Buscar por nome..."
-            className="w-full p-2 text-sm border border-slate-300 rounded-md bg-white outline-none focus:ring-2 focus:ring-red-500"
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-semibold text-slate-600 mb-1">Resultado Final</label>
-          <select value={filtroResultado} onChange={(e) => setFiltroResultado(e.target.value)} className="w-full p-2 text-sm border border-slate-300 rounded-md bg-white outline-none focus:ring-2 focus:ring-red-500">
-            <option value="">Todos</option>
-            <option value="Aprovado">Aprovado</option>
-            <option value="Pendente">Pendente</option>
-            <option value="Reprovado">Reprovado</option>
-          </select>
-        </div>
-      </div>
+        {resultadosSubTab === 'lista' ? (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Módulo</label>
+                <select value={filtroModulo} onChange={(e) => setFiltroModulo(e.target.value)} className="w-full p-2 text-sm border border-slate-300 rounded-md bg-white outline-none focus:ring-2 focus:ring-red-500">
+                  <option value="">Todos</option>
+                  {Array.from(new Set(aggregatedResultados.map(res => {
+                    const modulo = modulos.find(m => m.id === res.modulo_id);
+                    return res.isTeorica || res.isProvaTeorica ? res.modulo_nome : (modulo ? modulo.tema : 'Desconhecido');
+                  }))).map(tema => (
+                    <option key={tema} value={tema}>{tema}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Grau Pretendido</label>
+                <select value={filtroGrau} onChange={(e) => setFiltroGrau(e.target.value)} className="w-full p-2 text-sm border border-slate-300 rounded-md bg-white outline-none focus:ring-2 focus:ring-red-500">
+                  <option value="">Todos</option>
+                  {Array.from(new Set(aggregatedResultados.map(res => res.grau_pretendido))).map(grau => (
+                    <option key={grau} value={grau}>{grau}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Candidato</label>
+                <input 
+                  type="text" 
+                  value={filtroCandidato} 
+                  onChange={(e) => setFiltroCandidato(e.target.value)} 
+                  placeholder="Buscar por nome..."
+                  className="w-full p-2 text-sm border border-slate-300 rounded-md bg-white outline-none focus:ring-2 focus:ring-red-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Resultado Final</label>
+                <select value={filtroResultado} onChange={(e) => setFiltroResultado(e.target.value)} className="w-full p-2 text-sm border border-slate-300 rounded-md bg-white outline-none focus:ring-2 focus:ring-red-500">
+                  <option value="">Todos</option>
+                  <option value="Aprovado">Aprovado</option>
+                  <option value="Pendente">Pendente</option>
+                  <option value="Reprovado">Reprovado</option>
+                </select>
+              </div>
+            </div>
 
-      {isLoadingResultados ? (
-        <div className="text-center py-8 text-slate-500">Carregando resultados...</div>
-      ) : filteredResultados.length === 0 ? (
-        <div className="text-center py-8 text-slate-500">Nenhum resultado encontrado.</div>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-slate-50 text-slate-600 text-sm uppercase tracking-wider border-b border-slate-200">
-                {isUserAdmin(loggedUser) && (
-                  <th className="p-3 w-12 text-center">
-                    <input 
-                      type="checkbox" 
-                      className="rounded text-red-600 focus:ring-red-500 cursor-pointer"
-                      checked={selectedResultados.size === filteredResultados.length && filteredResultados.length > 0}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setSelectedResultados(new Set(filteredResultados.map(r => r.id)));
-                        } else {
-                          setSelectedResultados(new Set());
-                        }
-                      }}
-                    />
-                  </th>
-                )}
-                <th className="p-3 font-semibold">Data</th>
-                <th className="p-3 font-semibold">Candidato</th>
-                <th className="p-3 font-semibold">Grau Pretendido</th>
-                <th className="p-3 font-semibold">Módulo</th>
-                <th className="p-3 font-semibold">Média</th>
-                <th className="p-3 font-semibold">Resultado Final</th>
-                <th className="p-3 font-semibold text-center">Ações</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredResultados.map((res) => {
-                const candidato = candidatos.find(c => c.id === res.candidato_id);
-                const modulo = modulos.find(m => m.id === res.modulo_id);
-                const nomeCandidato = candidato ? candidato.nome : res.candidato_nome || 'Desconhecido';
-                const temaModulo = res.isTeorica || res.isProvaTeorica ? res.modulo_nome : (modulo ? (modulo.nome || modulo.tema) : 'Desconhecido');
-                const isKatas = modulo?.tema === 'Katas';
-                
-                return (
-                  <tr key={res.id} className="hover:bg-slate-50 transition-colors">
-                    {isUserAdmin(loggedUser) && (
-                      <td className="p-3 text-center">
-                        <input 
-                          type="checkbox" 
-                          className="rounded text-red-600 focus:ring-red-500 cursor-pointer"
-                          checked={selectedResultados.has(res.id)}
-                          onChange={(e) => {
-                            const newSelected = new Set(selectedResultados);
-                            if (e.target.checked) {
-                              newSelected.add(res.id);
-                            } else {
-                              newSelected.delete(res.id);
+            {isLoadingResultados ? (
+              <div className="text-center py-8 text-slate-500">Carregando resultados...</div>
+            ) : filteredResultados.length === 0 ? (
+              <div className="text-center py-8 text-slate-500">Nenhum resultado encontrado.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 text-slate-600 text-sm uppercase tracking-wider border-b border-slate-200">
+                      {isUserAdmin(loggedUser) && (
+                        <th className="p-3 w-12 text-center">
+                          <input 
+                            type="checkbox" 
+                            className="rounded text-red-600 focus:ring-red-500 cursor-pointer"
+                            checked={selectedResultados.size === filteredResultados.length && filteredResultados.length > 0}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedResultados(new Set(filteredResultados.map(r => r.id)));
+                              } else {
+                                setSelectedResultados(new Set());
+                              }
+                            }}
+                          />
+                        </th>
+                      )}
+                      <th className="p-3 font-semibold">Data</th>
+                      <th className="p-3 font-semibold">Candidato</th>
+                      <th className="p-3 font-semibold">Grau Pretendido</th>
+                      <th className="p-3 font-semibold">Módulo</th>
+                      <th className="p-3 font-semibold">Média</th>
+                      <th className="p-3 font-semibold">Resultado Final</th>
+                      <th className="p-3 font-semibold text-center">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredResultados.map((res) => {
+                      const candidato = candidatos.find(c => c.id === res.candidato_id);
+                      const modulo = modulos.find(m => m.id === res.modulo_id);
+                      const nomeCandidato = candidato ? candidato.nome : res.candidato_nome || 'Desconhecido';
+                      const temaModulo = res.isTeorica || res.isProvaTeorica ? res.modulo_nome : (modulo ? (modulo.nome || modulo.tema) : 'Desconhecido');
+                      const isKatas = modulo?.tema === 'Katas';
+                      
+                      return (
+                        <tr key={res.id} className="hover:bg-slate-50 transition-colors">
+                          {isUserAdmin(loggedUser) && (
+                            <td className="p-3 text-center">
+                              <input 
+                                type="checkbox" 
+                                className="rounded text-red-600 focus:ring-red-500 cursor-pointer"
+                                checked={selectedResultados.has(res.id)}
+                                onChange={(e) => {
+                                  const newSelected = new Set(selectedResultados);
+                                  if (e.target.checked) {
+                                    newSelected.add(res.id);
+                                  } else {
+                                    newSelected.delete(res.id);
+                                  }
+                                  setSelectedResultados(newSelected);
+                                }}
+                              />
+                            </td>
+                          )}
+                          <td className="p-3 text-sm text-slate-600">
+                            {res.created_at.includes('T') ? new Date(res.created_at).toLocaleDateString('pt-BR') : res.created_at.split('-').reverse().join('/')}
+                          </td>
+                          <td className="p-3 font-medium text-slate-800">
+                            {nomeCandidato}
+                          </td>
+                          <td className="p-3 text-sm text-slate-600">
+                            {res.grau_pretendido}
+                          </td>
+                          <td className="p-3 text-sm text-slate-600">
+                            {temaModulo} {res.isTeorica && <span className="text-xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded ml-1">Teórica</span>}
+                            {res.isProvaTeorica && <span className="text-xs bg-purple-100 text-purple-800 px-1.5 py-0.5 rounded ml-1">Prova</span>}
+                          </td>
+                          <td className="p-3 text-sm text-slate-600">
+                            {res.isTeorica || res.isProvaTeorica
+                              ? (res.media_teorica !== null && res.media_teorica !== undefined ? `${res.media_teorica.toFixed(1)}%` : '-')
+                              : isKatas 
+                                ? (res.nota_kata !== null && res.nota_kata !== undefined ? `${res.nota_kata}%` : '-')
+                                : (res.percentual_waza !== null && res.percentual_waza !== undefined ? `${res.percentual_waza}%` : '-')
                             }
-                            setSelectedResultados(newSelected);
-                          }}
-                        />
-                      </td>
+                          </td>
+                          <td className="p-3">
+                            <div className="flex flex-col gap-1">
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium w-fit ${
+                                res.veredito === 'Aprovado' ? 'bg-emerald-100 text-emerald-800' :
+                                res.veredito === 'Reprovado' ? 'bg-red-100 text-red-800' :
+                                'bg-amber-100 text-amber-800'
+                              }`}>
+                                {res.veredito}
+                              </span>
+                              {!res.isTeorica && !res.isProvaTeorica && (
+                                <span className="text-xs text-slate-400">
+                                  {res.avaliadores_count} avaliador{res.avaliadores_count !== 1 ? 'es' : ''}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="p-3 text-center">
+                            <div className="flex items-center justify-center gap-2">
+                              {!res.isTeorica && !res.isProvaTeorica && (
+                                <button 
+                                  onClick={() => handlePrintResult(res)}
+                                  className="text-slate-500 hover:text-red-600 p-2 rounded-full hover:bg-red-50 transition-colors"
+                                  title="Gerar PDF Detalhado"
+                                >
+                                  <FileText className="w-5 h-5" />
+                                </button>
+                              )}
+                              {isUserAdmin(loggedUser) && (
+                                <button 
+                                  onClick={() => handleDeleteResultados([res.id])}
+                                  className="text-slate-400 hover:text-red-600 p-2 rounded-full hover:bg-red-50 transition-colors"
+                                  title="Excluir Avaliação"
+                                >
+                                  <Trash2 className="w-5 h-5" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="space-y-6">
+            <div className="flex flex-col md:flex-row gap-4 mb-4">
+              <div className="flex-1 relative">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input 
+                  type="text" 
+                  value={filtroAcompanhamento}
+                  onChange={(e) => setFiltroAcompanhamento(e.target.value)}
+                  placeholder="Buscar candidato ou dojo..."
+                  className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-red-500"
+                />
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer bg-slate-50 px-4 py-2 rounded-lg border border-slate-200">
+                <input 
+                  type="checkbox" 
+                  checked={filtroAcompanhamentoPendentes}
+                  onChange={(e) => setFiltroAcompanhamentoPendentes(e.target.checked)}
+                  className="rounded text-red-600 focus:ring-red-500"
+                />
+                <span className="text-sm font-medium text-slate-700">Apenas Pendentes</span>
+              </label>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {filteredAcompanhamento.map(cand => (
+                <div key={cand.id} className="bg-slate-50 border border-slate-200 rounded-xl p-4 hover:shadow-md transition-all">
+                  <div className="flex justify-between items-start mb-4">
+                    <div>
+                      <h3 className="font-bold text-slate-900">{cand.nome}</h3>
+                      <p className="text-xs text-slate-500">{cand.dojo} • {cand.grau_pretendido}</p>
+                    </div>
+                    {cand.temPendencia ? (
+                      <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3" /> Pendente
+                      </span>
+                    ) : (
+                      <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+                        <CheckCircle className="w-3 h-3" /> Completo
+                      </span>
                     )}
-                    <td className="p-3 text-sm text-slate-600">
-                      {res.created_at.includes('T') ? new Date(res.created_at).toLocaleDateString('pt-BR') : res.created_at.split('-').reverse().join('/')}
-                    </td>
-                    <td className="p-3 font-medium text-slate-800">
-                      {nomeCandidato}
-                    </td>
-                    <td className="p-3 text-sm text-slate-600">
-                      {res.grau_pretendido}
-                    </td>
-                    <td className="p-3 text-sm text-slate-600">
-                      {temaModulo} {res.isTeorica && <span className="text-xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded ml-1">Teórica</span>}
-                      {res.isProvaTeorica && <span className="text-xs bg-purple-100 text-purple-800 px-1.5 py-0.5 rounded ml-1">Prova</span>}
-                    </td>
-                    <td className="p-3 text-sm text-slate-600">
-                      {res.isTeorica || res.isProvaTeorica
-                        ? (res.media_teorica !== null && res.media_teorica !== undefined ? `${res.media_teorica.toFixed(1)}%` : '-')
-                        : isKatas 
-                          ? (res.nota_kata !== null && res.nota_kata !== undefined ? `${res.nota_kata}%` : '-')
-                          : (res.percentual_waza !== null && res.percentual_waza !== undefined ? `${res.percentual_waza}%` : '-')
-                      }
-                    </td>
-                    <td className="p-3">
-                      <div className="flex flex-col gap-1">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium w-fit ${
-                          res.veredito === 'Aprovado' ? 'bg-emerald-100 text-emerald-800' :
-                          res.veredito === 'Reprovado' ? 'bg-red-100 text-red-800' :
-                          'bg-amber-100 text-amber-800'
-                        }`}>
-                          {res.veredito}
-                        </span>
-                        {!res.isTeorica && !res.isProvaTeorica && (
-                          <span className="text-xs text-slate-400">
-                            {res.avaliadores_count} avaliador{res.avaliadores_count !== 1 ? 'es' : ''}
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="p-3 text-center">
-                      <div className="flex items-center justify-center gap-2">
-                        {!res.isTeorica && !res.isProvaTeorica && (
-                          <button 
-                            onClick={() => handlePrintResult(res)}
-                            className="text-slate-500 hover:text-red-600 p-2 rounded-full hover:bg-red-50 transition-colors"
-                            title="Gerar PDF Detalhado"
-                          >
-                            <FileText className="w-5 h-5" />
-                          </button>
-                        )}
-                        {isUserAdmin(loggedUser) && (
-                          <button 
-                            onClick={() => handleDeleteResultados([res.id])}
-                            className="text-slate-400 hover:text-red-600 p-2 rounded-full hover:bg-red-50 transition-colors"
-                            title="Excluir Avaliação"
-                          >
-                            <Trash2 className="w-5 h-5" />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
+                  </div>
+
+                  <div className="space-y-3">
+                    <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest border-b pb-1">Módulos de Avaliação</h4>
+                    {cand.statusModulos.length === 0 ? (
+                      <p className="text-xs text-slate-400 italic">Nenhum módulo vinculado.</p>
+                    ) : (
+                      cand.statusModulos.map(mod => (
+                        <div key={mod.moduloId} className="flex justify-between items-center text-sm">
+                          <div className="flex items-center gap-2">
+                            <span className={`w-2 h-2 rounded-full ${mod.status === 'Pendente' ? 'bg-amber-400' : mod.status === 'Reprovado' ? 'bg-red-400' : 'bg-emerald-400'}`}></span>
+                            <span className="text-slate-700 font-medium truncate max-w-[120px]">{mod.tema}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs">
+                            {mod.nota !== null && (
+                              <span className="font-bold text-slate-500">{mod.nota}%</span>
+                            )}
+                            <span className={`px-2 py-0.5 rounded ${mod.status === 'Pendente' ? 'bg-amber-50 text-amber-600 border border-amber-100' : mod.status === 'Reprovado' ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-emerald-50 text-emerald-600 border border-emerald-100'}`}>
+                              {mod.status}
+                            </span>
+                          </div>
+                        </div>
+                      ))
+                    )}
+
+                    {cand.statusProvas.length > 0 && (
+                      <>
+                        <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest border-b pb-1 mt-4">Provas Teóricas</h4>
+                        {cand.statusProvas.map((prova, idx) => (
+                          <div key={idx} className="flex justify-between items-center text-sm">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-purple-400"></span>
+                              <span className="text-slate-700 font-medium truncate max-w-[120px]">{prova.titulo}</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-xs">
+                              <span className="font-bold text-slate-500">{prova.nota}%</span>
+                              <span className="px-2 py-0.5 rounded bg-purple-50 text-purple-600 border border-purple-100">
+                                {prova.status}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {filteredAcompanhamento.length === 0 && (
+                <div className="col-span-full py-12 text-center text-slate-400">
+                  Nenhum candidato encontrado com os filtros aplicados.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   if (loggedRole === 'candidato' || loggedRole === 'ouvinte') {
     return <CandidatoDashboard 
@@ -3679,6 +3870,15 @@ export default function App() {
 
             {/* Main Navigation Tabs */}
             <div className="flex flex-wrap justify-center rounded-lg p-1" style={{ backgroundColor: 'rgba(0,0,0,0.2)' }}>
+              {isUserAdmin(loggedUser) && (
+                <button 
+                  onClick={() => { setMainTab('dashboard'); setCurrentView('dashboard' as any); }}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${mainTab === 'dashboard' ? 'bg-white shadow-sm' : 'text-white/80 hover:bg-white/10'}`}
+                  style={mainTab === 'dashboard' ? { color: orgSettings?.cor_primaria || '#b91c1c' } : {}}
+                >
+                  <BarChart3 className="w-4 h-4" /> Dashboard
+                </button>
+              )}
               {(loggedRole === 'avaliador' || loggedRole === 'avaliador_convidado' || loggedRole === 'admin' || loggedRole === 'coordenador') && (
                 <button 
                   onClick={() => { setMainTab('avaliacao'); setCurrentView('avaliacao'); }}
@@ -4388,6 +4588,11 @@ export default function App() {
         {/* VIEW: PERFIS CANDIDATOS */}
         {isUserAdmin(loggedUser) && mainTab === 'perfis_candidatos' && (
           <PerfisAdmin loggedUser={loggedUser} showToast={showToast} />
+        )}
+
+        {/* VIEW: GESTOR DASHBOARD */}
+        {isUserAdmin(loggedUser) && mainTab === 'dashboard' && (
+          <ManagerDashboard loggedUser={loggedUser} orgId={loggedUser?.organizacao_id || ''} />
         )}
 
         {/* VIEW: REALIZAR PROVA (CANDIDATO) */}

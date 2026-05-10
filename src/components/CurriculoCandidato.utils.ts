@@ -204,6 +204,83 @@ export function getRequiredPoints(grau: string): number {
   return 700;
 }
 
+export function calculateCurriculumPoints(data: any): number {
+  if (!data) return 0;
+  
+  const anoExameNum = Number(data.anoExame || new Date().getFullYear());
+  const grauEfetivo = data.grauPretendido;
+  const carenciaAnosNum = getCarenciaAnos(grauEfetivo || '');
+
+  // 1. Formação
+  let formacaoPts = Number(data.formacao?.pontuacao || 0);
+
+  // 2. Graduação Arbitragem
+  let arbitragemPts = Number(data.arbitragem?.pontuacaoShiai || 0) + Number(data.arbitragem?.pontuacaoKata || 0);
+
+  // 3. Cargos Administrativos
+  let cargosPts = 0;
+  if (data.cargos) {
+    cargosPts = data.cargos.reduce((acc: number, item: any) => {
+      let ptsForCargo = 0;
+      if (cargosScores[item.cargo]) {
+        const basePts = cargosScores[item.cargo].pts;
+        if (cargosScores[item.cargo].isAnual) {
+          const validCount = getAnosValidosCargo(item.anoInicial, item.anoFinal, anoExameNum, carenciaAnosNum);
+          ptsForCargo = validCount > 0 ? basePts * validCount : 0;
+        } else {
+          const validCount = getAnosValidosCargo(item.anoInicial, item.anoFinal || item.anoInicial, anoExameNum, carenciaAnosNum);
+          if (validCount > 0) ptsForCargo = basePts;
+        }
+      }
+      return acc + ptsForCargo;
+    }, 0);
+  }
+  
+  // 4. Eventos
+  let eventosPts = 0;
+  if (data.eventos) {
+    eventosPts = data.eventos.reduce((acc: number, item: any) => {
+      let valid = isAnoValid(item.ano, anoExameNum, carenciaAnosNum);
+      if (item.evento === 'Cursos fora do periodo de carencia' && (item.ambito === 'Nacional' || item.ambito === 'Internacional')) {
+        valid = true;
+      }
+      return acc + (valid ? Number(item.pontuacao || 0) : 0);
+    }, 0);
+  }
+  
+  // 5. Competições Atleta
+  let competicoesPts = 0;
+  if (data.competicoesAtleta) {
+    competicoesPts = data.competicoesAtleta.reduce((acc: number, item: any) => {
+      const valid = isAnoValid(item.ano, anoExameNum, carenciaAnosNum);
+      return acc + (valid ? Number(item.pontuacao || 0) : 0);
+    }, 0);
+  }
+
+  // 6. Atuação em Competições
+  let atuacaoPts = 0;
+  if (data.atuacaoCompeticoes) {
+    atuacaoPts = data.atuacaoCompeticoes.reduce((acc: number, item: any) => {
+      const valid = isAnoValid(item.ano, anoExameNum, carenciaAnosNum);
+      return acc + (valid ? Number(item.pontuacao || 0) : 0);
+    }, 0);
+  }
+
+  // 7. Histórico
+  let historicoPts = 0;
+  if (data.historicoForaCarencia) {
+    historicoPts = data.historicoForaCarencia.reduce((acc: number, item: any) => acc + Number(item.pontuacao || 0), 0);
+  }
+
+  // 8. Produção
+  let producaoPts = 0;
+  if (data.producaoAcademica) {
+    producaoPts = data.producaoAcademica.reduce((acc: number, item: any) => acc + Number(item.pontuacao || 0), 0);
+  }
+
+  return formacaoPts + eventosPts + arbitragemPts + cargosPts + competicoesPts + atuacaoPts + historicoPts + producaoPts;
+}
+
 export function getNextDan(currentGrad: string): string {
   if (!currentGrad) return '1º Dan';
   

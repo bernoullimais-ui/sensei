@@ -19,7 +19,10 @@ import {
   Trash2,
   Inbox,
   Search,
-  ChevronRight
+  ChevronRight,
+  Pencil,
+  Pin,
+  PinOff
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -36,6 +39,7 @@ interface Post {
   likes_count: number;
   comments_count: number;
   is_liked?: boolean;
+  is_pinned?: boolean;
 }
 
 interface Comment {
@@ -76,6 +80,7 @@ export const Community: React.FC<CommunityProps> = ({ loggedUser, orgSettings })
   const [posts, setPosts] = useState<Post[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
+  const [editingPostId, setEditingPostId] = useState<string | null>(null);
   const [newPost, setNewPost] = useState<{ title: string; content: string; category: 'Dúvidas' | 'Avisos' | 'Geral' }>({ title: '', content: '', category: 'Geral' });
   const [selectedCategory, setSelectedCategory] = useState<string>('Todos');
   const [activePostId, setActivePostId] = useState<string | null>(null);
@@ -178,6 +183,7 @@ export const Community: React.FC<CommunityProps> = ({ loggedUser, orgSettings })
         .from('community_posts')
         .select('*')
         .eq('organizacao_id', loggedUser?.organizacao_id)
+        .order('is_pinned', { ascending: false })
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -294,13 +300,19 @@ export const Community: React.FC<CommunityProps> = ({ loggedUser, orgSettings })
             });
           }
         } else if (payload.eventType === 'UPDATE') {
-          setPosts(prev => prev.map(p => {
-            if (p.id === payload.new.id) {
-              // Mantemos o is_liked e permitimos que o servidor mande os contadores corrigidos
-              return { ...p, ...payload.new, is_liked: p.is_liked };
-            }
-            return p;
-          }));
+          setPosts(prev => {
+            const updated = prev.map(p => {
+              if (p.id === payload.new.id) {
+                return { ...p, ...payload.new, is_liked: p.is_liked };
+              }
+              return p;
+            });
+            // Re-sort if is_pinned might have changed
+            return [...updated].sort((a, b) => {
+              if (a.is_pinned !== b.is_pinned) return a.is_pinned ? -1 : 1;
+              return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+            });
+          });
         } else if (payload.eventType === 'DELETE') {
           setPosts(prev => prev.filter(p => p.id !== payload.old.id));
         }
@@ -354,27 +366,52 @@ export const Community: React.FC<CommunityProps> = ({ loggedUser, orgSettings })
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Sessão expirada. Faça login novamente.');
 
-      const { error } = await supabase
-        .from('community_posts')
-        .insert([{
-          title: newPost.title,
-          content: newPost.content,
-          category: newPost.category,
-          user_id: user.id,
-          user_nome: loggedUser.nome,
-          user_role: loggedUser.role,
-          organizacao_id: loggedUser.organizacao_id,
-        }]);
+      if (editingPostId) {
+        const { error } = await supabase
+          .from('community_posts')
+          .update({
+            title: newPost.title,
+            content: newPost.content,
+            category: newPost.category
+          })
+          .eq('id', editingPostId);
 
-      if (error) throw error;
+        if (error) throw error;
+        setPosts(prev => prev.map(p => p.id === editingPostId ? { ...p, ...newPost } : p));
+      } else {
+        const { error } = await supabase
+          .from('community_posts')
+          .insert([{
+            title: newPost.title,
+            content: newPost.content,
+            category: newPost.category,
+            user_id: user.id,
+            user_nome: loggedUser.nome,
+            user_role: loggedUser.role,
+            organizacao_id: loggedUser.organizacao_id,
+          }]);
+
+        if (error) throw error;
+      }
 
       setNewPost({ title: '', content: '', category: 'Geral' });
       setIsCreating(false);
+      setEditingPostId(null);
     } catch (error: any) {
       alert('Erro ao publicar: ' + error.message);
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleStartEdit = (post: Post) => {
+    setNewPost({
+      title: post.title,
+      content: post.content,
+      category: post.category
+    });
+    setEditingPostId(post.id);
+    setIsCreating(true);
   };
 
   const handleCreateComment = async (postId: string) => {
@@ -430,6 +467,31 @@ export const Community: React.FC<CommunityProps> = ({ loggedUser, orgSettings })
       }
     } catch (error: any) {
       console.error('Error liking post:', error);
+    }
+  };
+
+  const handlePinPost = async (postId: string, currentPinned: boolean) => {
+    if (!isGestor) return;
+    
+    try {
+      const { error } = await supabase
+        .from('community_posts')
+        .update({ is_pinned: !currentPinned })
+        .eq('id', postId);
+      
+      if (error) throw error;
+      
+      // Update local state and re-sort
+      setPosts(prev => {
+        const updated = prev.map(p => p.id === postId ? { ...p, is_pinned: !currentPinned } : p);
+        return [...updated].sort((a, b) => {
+          if (a.is_pinned !== b.is_pinned) return a.is_pinned ? -1 : 1;
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        });
+      });
+    } catch (error: any) {
+      console.error('Error pinning post:', error);
+      alert('Erro ao fixar postagem: ' + error.message);
     }
   };
 
@@ -651,10 +713,15 @@ export const Community: React.FC<CommunityProps> = ({ loggedUser, orgSettings })
                   <div className="p-6">
                     <div className="flex justify-between items-start mb-4">
                       <div className="flex items-center gap-3">
-                        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${
+                        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center relative ${
                           post.user_role === 'admin' ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'
                         }`}>
                           <User className="w-6 h-6" />
+                          {post.is_pinned && (
+                            <div className="absolute -top-1 -right-1 bg-amber-500 text-white p-1 rounded-full shadow-sm">
+                              <Pin className="w-2.5 h-2.5 fill-current" />
+                            </div>
+                          )}
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
@@ -673,20 +740,46 @@ export const Community: React.FC<CommunityProps> = ({ loggedUser, orgSettings })
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        {(isGestor || post.user_id === myId) && (
-                          <button 
+                        {isGestor && (
+                          <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleDeletePost(post.id);
+                              handlePinPost(post.id, !!post.is_pinned);
                             }}
-                            disabled={isSubmitting}
                             className={`p-2 rounded-lg transition-all ${
-                              isSubmitting ? 'opacity-30' : 'text-slate-400 hover:text-red-600 hover:bg-red-50'
+                              post.is_pinned ? 'bg-amber-100 text-amber-600' : 'text-slate-400 hover:text-amber-600 hover:bg-amber-50'
                             }`}
-                            title="Excluir postagem"
+                            title={post.is_pinned ? 'Desafixar do topo' : 'Fixar no topo'}
                           >
-                            <Trash2 className="w-5 h-5" />
+                            {post.is_pinned ? <PinOff className="w-4 h-4" /> : <Pin className="w-4 h-4" />}
                           </button>
+                        )}
+                        {(isGestor || post.user_id === myId) && (
+                          <div className="flex items-center gap-1">
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleStartEdit(post);
+                              }}
+                              className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                              title="Editar postagem"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeletePost(post.id);
+                              }}
+                              disabled={isSubmitting}
+                              className={`p-2 rounded-lg transition-all ${
+                                isSubmitting ? 'opacity-30' : 'text-slate-400 hover:text-red-600 hover:bg-red-50'
+                              }`}
+                              title="Excluir postagem"
+                            >
+                              <Trash2 className="w-5 h-5" />
+                            </button>
+                          </div>
                         )}
                         <div className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
                           post.category === 'Avisos' ? 'bg-amber-100 text-amber-700' :
@@ -956,8 +1049,8 @@ export const Community: React.FC<CommunityProps> = ({ loggedUser, orgSettings })
             >
               <form onSubmit={handleCreatePost}>
                 <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                  <h3 className="text-xl font-black text-slate-900">Nova Postagem</h3>
-                  <button type="button" onClick={() => setIsCreating(false)} className="text-slate-400 hover:text-slate-600">
+                  <h3 className="text-xl font-black text-slate-900">{editingPostId ? 'Editar Postagem' : 'Nova Postagem'}</h3>
+                  <button type="button" onClick={() => { setIsCreating(false); setEditingPostId(null); }} className="text-slate-400 hover:text-slate-600">
                     <X className="w-6 h-6" />
                   </button>
                 </div>
@@ -1017,7 +1110,7 @@ export const Community: React.FC<CommunityProps> = ({ loggedUser, orgSettings })
                     disabled={isSubmitting}
                     className="px-8 py-2.5 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-100 disabled:opacity-50"
                   >
-                    {isSubmitting ? 'Publicando...' : 'Publicar'}
+                    {isSubmitting ? 'Salvando...' : (editingPostId ? 'Salvar Alterações' : 'Publicar')}
                   </button>
                 </div>
               </form>

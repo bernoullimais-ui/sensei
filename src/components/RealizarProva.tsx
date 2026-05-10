@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { FileText, Clock, AlertCircle, CheckCircle, ChevronRight, ChevronLeft } from 'lucide-react';
+import { FileText, Clock, AlertCircle, CheckCircle, ChevronRight, ChevronLeft, Eye } from 'lucide-react';
+import { ReviewExam } from './ReviewExam';
 
 interface RealizarProvaProps {
   candidatoId: string;
@@ -15,6 +16,7 @@ export function RealizarProva({ candidatoId, loggedUser }: RealizarProvaProps) {
 
   // Estado da prova em andamento
   const [provaAtiva, setProvaAtiva] = useState<any | null>(null);
+  const [reviewId, setReviewId] = useState<string | null>(null);
   const [questoesProva, setQuestoesProva] = useState<any[]>([]);
   const [respostas, setRespostas] = useState<Record<string, string>>({});
   const [questaoAtualIndex, setQuestaoAtualIndex] = useState(0);
@@ -288,6 +290,10 @@ export function RealizarProva({ candidatoId, loggedUser }: RealizarProvaProps) {
     return <div className="p-8 text-center text-slate-500">Carregando provas...</div>;
   }
 
+  if (reviewId) {
+    return <ReviewExam provaId={reviewId} candidatoId={candidatoId} onBack={() => setReviewId(null)} />;
+  }
+
   if (resultadoFinal) {
     return (
       <div className="bg-white p-8 rounded-xl shadow-sm border border-slate-200 text-center animate-in zoom-in-95">
@@ -537,14 +543,15 @@ export function RealizarProva({ candidatoId, loggedUser }: RealizarProvaProps) {
                   <th className="p-4 font-semibold">Prova</th>
                   <th className="p-4 font-semibold">Data de Realização</th>
                   <th className="p-4 font-semibold text-center">Nota</th>
+                  <th className="p-4 font-semibold text-center">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {provasRealizadas.map(p => (
-                  <tr key={p.id} className="hover:bg-slate-50">
+                  <tr key={p.id} className="hover:bg-slate-50 transition-colors">
                     <td className="p-4 font-medium text-slate-800">{p.titulo}</td>
                     <td className="p-4 text-slate-600">
-                      {p.resultado?.finalizada_em ? new Date(p.resultado.finalizada_em).toLocaleString('pt-BR') : '-'}
+                      {p.resultado?.created_at ? new Date(p.resultado.created_at).toLocaleString('pt-BR') : '-'}
                     </td>
                     <td className="p-4 text-center">
                       <span className={`inline-block px-3 py-1 rounded-full font-bold text-sm ${
@@ -552,6 +559,15 @@ export function RealizarProva({ candidatoId, loggedUser }: RealizarProvaProps) {
                       }`}>
                         {Number(p.resultado?.nota || 0).toFixed(1)}
                       </span>
+                    </td>
+                    <td className="p-4 text-center">
+                      <button 
+                        onClick={() => setReviewId(p.id)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-xs font-medium transition-colors mx-auto"
+                        title="Ver Detalhes da Prova"
+                      >
+                        <Eye className="w-3.5 h-3.5" /> Ver Detalhes
+                      </button>
                     </td>
                   </tr>
                 ))}

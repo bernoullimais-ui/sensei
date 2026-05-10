@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { CertificateTemplate } from './CertificateDesigner';
 import { RealizarProva } from './RealizarProva';
+import { ReviewExam } from './ReviewExam';
 import { CurriculoCandidato } from './CurriculoCandidato';
 import { CensoPerfil } from './CensoPerfil';
 import { CursosCandidato } from './CursosCandidato';
@@ -45,6 +46,7 @@ export function CandidatoDashboard({
     
   const [activeTab, setActiveTab] = useState<'provas' | 'resultados' | 'curriculo' | 'perfil' | 'cursos' | 'comunidade'>(initialTab);
   const [selectedEval, setSelectedEval] = useState<any | null>(null);
+  const [showReview, setShowReview] = useState<string | null>(null);
   const [detailedData, setDetailedData] = useState<{waza: any[], kata: any[], kihon: any[]}>({ waza: [], kata: [], kihon: [] });
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
 
@@ -184,6 +186,10 @@ export function CandidatoDashboard({
   }, [detailedData, selectedEval, modulos]);
 
   const renderResultados = () => {
+    if (showReview) {
+      return <ReviewExam provaId={showReview} candidatoId={candidato.reference_id || candidato.id} onBack={() => setShowReview(null)} />;
+    }
+
     if (selectedEval) {
       const modulo = modulos.find(m => m.id === selectedEval.modulo_id);
       const isKatas = modulo?.tema === 'Katas';
@@ -238,6 +244,17 @@ export function CandidatoDashboard({
               </div>
             </div>
           </div>
+
+          {isTeorica && selectedEval.prova_id && (
+            <div className="mb-6">
+              <button 
+                onClick={() => setShowReview(selectedEval.prova_id)}
+                className="flex items-center gap-2 px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-900 transition-colors shadow-sm font-medium"
+              >
+                <FileText className="w-4 h-4" /> Ver Detalhes das Respostas
+              </button>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">

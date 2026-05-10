@@ -22,7 +22,8 @@ import {
   isAnoValid,
   getAnosValidosCargo,
   getRequiredPoints,
-  getNextDan
+  getNextDan,
+  calculateCurriculumPoints
 } from './CurriculoCandidato.utils';
 
 interface CurriculoCandidatoProps {
@@ -192,80 +193,7 @@ export function CurriculoCandidato({ candidato, tableName = 'candidatos', onShow
   };
 
   // Helper to sum points
-  const calcTotal = () => {
-    // 1. Formação
-    let formacaoPts = Number(data.formacao?.pontuacao || 0);
-
-    // 2. Graduação Arbitragem
-    let arbitragemPts = Number(data.arbitragem?.pontuacaoShiai || 0) + Number(data.arbitragem?.pontuacaoKata || 0);
-
-    // 3. Cargos Administrativos
-    let cargosPts = 0;
-    if (data.cargos) {
-      cargosPts = data.cargos.reduce((acc: number, item: any) => {
-        let ptsForCargo = 0;
-        if (cargosScores[item.cargo]) {
-          const basePts = cargosScores[item.cargo].pts;
-          if (cargosScores[item.cargo].isAnual) {
-            const validCount = getAnosValidosCargo(item.anoInicial, item.anoFinal, anoExameNum, carenciaAnosNum);
-            ptsForCargo = validCount > 0 ? basePts * validCount : 0; // Se preencheu, só vale validos
-          } else {
-             // Not annual: check if AT LEAST ONE of the years fits in carencia?
-             // Actually, for singular, we can use start year or end year
-             const validCount = getAnosValidosCargo(item.anoInicial, item.anoFinal || item.anoInicial, anoExameNum, carenciaAnosNum);
-             if (validCount > 0) ptsForCargo = basePts;
-          }
-        }
-        return acc + ptsForCargo;
-      }, 0);
-    }
-    
-    // 4. Eventos
-    let eventosPts = 0;
-    if (data.eventos) {
-      eventosPts = data.eventos.reduce((acc: number, item: any) => {
-        let valid = isAnoValid(item.ano, anoExameNum, carenciaAnosNum);
-        if (item.evento === 'Cursos fora do periodo de carencia' && (item.ambito === 'Nacional' || item.ambito === 'Internacional')) {
-          valid = true; // Exceção à regra de carência
-        }
-        return acc + (valid ? Number(item.pontuacao || 0) : 0);
-      }, 0);
-    }
-    
-    // 5. Competições Atleta
-    let competicoesPts = 0;
-    if (data.competicoesAtleta) {
-      competicoesPts = data.competicoesAtleta.reduce((acc: number, item: any) => {
-        const valid = isAnoValid(item.ano, anoExameNum, carenciaAnosNum);
-        return acc + (valid ? Number(item.pontuacao || 0) : 0);
-      }, 0);
-    }
-
-    // 6. Atuação em Competições
-    let atuacaoPts = 0;
-    if (data.atuacaoCompeticoes) {
-      atuacaoPts = data.atuacaoCompeticoes.reduce((acc: number, item: any) => {
-        const valid = isAnoValid(item.ano, anoExameNum, carenciaAnosNum);
-        return acc + (valid ? Number(item.pontuacao || 0) : 0);
-      }, 0);
-    }
-
-    // 7. Histórico
-    let historicoPts = 0;
-    if (data.historicoForaCarencia) {
-      historicoPts = data.historicoForaCarencia.reduce((acc: number, item: any) => acc + Number(item.pontuacao || 0), 0);
-    }
-
-    // 8. Produção
-    let producaoPts = 0;
-    if (data.producaoAcademica) {
-      producaoPts = data.producaoAcademica.reduce((acc: number, item: any) => acc + Number(item.pontuacao || 0), 0);
-    }
-
-    return formacaoPts + eventosPts + arbitragemPts + cargosPts + competicoesPts + atuacaoPts + historicoPts + producaoPts;
-  };
-
-  const totalPoints = calcTotal();
+  const totalPoints = calculateCurriculumPoints(data);
 
   const chartData = [
     { name: 'Alcançado', value: totalPoints },
