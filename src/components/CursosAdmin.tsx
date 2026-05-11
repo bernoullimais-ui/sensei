@@ -67,6 +67,7 @@ export function CursosAdmin({ loggedUser, orgId }: CursosAdminProps) {
     onConfirm: () => {} 
   });
   const [displayItems, setDisplayItems] = useState<any[]>([]);
+  const [participantCounts, setParticipantCounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
     // Setup chat for live lesson when editing an existing step
@@ -151,6 +152,8 @@ export function CursosAdmin({ loggedUser, orgId }: CursosAdminProps) {
   const [activeTab, setActiveTab] = useState<'visao_geral' | 'conteudo' | 'participantes' | 'configuracoes' | 'engajamento' | 'acessar_curso'>('visao_geral');
   const [courseStats, setCourseStats] = useState({ total: 0, andamento: 0, concluido: 0, taxa: 0 });
   const [courseParticipants, setCourseParticipants] = useState<any[]>([]);
+  const [participantSearch, setParticipantSearch] = useState('');
+  const [participantStatusFilter, setParticipantStatusFilter] = useState('todos');
 
   const fetchCourseStats = async (cursoId: string) => {
     try {
@@ -455,6 +458,53 @@ export function CursosAdmin({ loggedUser, orgId }: CursosAdminProps) {
 
       if (cursosError) console.error('Error fetching courses:', cursosError);
       if (trilhasError) console.error('Error fetching trilhas:', trilhasError);
+
+      // Fetch participant counts and trilha associations for the relevant courses
+      const courseIds = (cursosData || []).map(c => c.id);
+      const trilhaIds = (trilhasData || []).map(t => t.id);
+
+      const [countsRes, trilhaCursosRes] = await Promise.all([
+        courseIds.length > 0 
+          ? supabase.from('curso_participantes').select('curso_id, usuario_id').in('curso_id', courseIds)
+          : Promise.resolve({ data: [] as any[], error: null }),
+        trilhaIds.length > 0
+          ? supabase.from('trilha_cursos').select('trilha_id, curso_id').in('trilha_id', trilhaIds)
+          : Promise.resolve({ data: [] as any[], error: null })
+      ]);
+
+      const countsMap: Record<string, number> = {};
+      
+      if (countsRes.data) {
+        // Individual course counts
+        countsRes.data.forEach((row: any) => {
+          countsMap[row.curso_id] = (countsMap[row.curso_id] || 0) + 1;
+        });
+
+        // Trilha counts (unique participants across all its courses)
+        if (trilhaCursosRes.data) {
+          const trilhaToUsers: Record<string, Set<string>> = {};
+          
+          trilhaCursosRes.data.forEach((tc: any) => {
+            if (!trilhaToUsers[tc.trilha_id]) {
+              trilhaToUsers[tc.trilha_id] = new Set();
+            }
+            
+            // Find participants for this course and add to the trilha's set
+            const courseUserIds = countsRes.data!
+              .filter((p: any) => p.curso_id === tc.curso_id)
+              .map((p: any) => p.usuario_id);
+              
+            courseUserIds.forEach(uid => trilhaToUsers[tc.trilha_id].add(uid));
+          });
+
+          // Convert sets to sizes
+          for (const tId in trilhaToUsers) {
+            countsMap[tId] = trilhaToUsers[tId].size;
+          }
+        }
+      }
+      
+      setParticipantCounts(countsMap);
       
       // Client-side filtering if needed, for now just show all to see if they appear
       const combined = [
@@ -747,7 +797,7 @@ export function CursosAdmin({ loggedUser, orgId }: CursosAdminProps) {
                             } finally {
                               setIsLoading(false);
                             }
-                          }}>0</td>
+                          }}>{participantCounts[item.id] || 0}</td>
                           <td className="px-6 py-4 text-slate-600 capitalize" onClick={async () => { 
                             setIsLoading(true);
                             try {
@@ -846,7 +896,7 @@ export function CursosAdmin({ loggedUser, orgId }: CursosAdminProps) {
                       ) : (
                         <>
                           <td className="px-6 py-4 font-medium text-slate-900" onClick={() => { setEditingTrilha(item); setIsTrilhaModalOpen(true); }}>{item.nome} <span className="ml-2 px-2 py-0.5 bg-emerald-100 text-emerald-800 text-xs font-bold rounded-full">Trilha</span></td>
-                          <td className="px-6 py-4 text-slate-600" onClick={() => { setEditingTrilha(item); setIsTrilhaModalOpen(true); }}>0</td>
+                          <td className="px-6 py-4 text-slate-600" onClick={() => { setEditingTrilha(item); setIsTrilhaModalOpen(true); }}>{participantCounts[item.id] || 0}</td>
                           <td className="px-6 py-4 text-slate-600 capitalize" onClick={() => { setEditingTrilha(item); setIsTrilhaModalOpen(true); }}>Pago</td>
                           <td className="px-6 py-4" onClick={() => { setEditingTrilha(item); setIsTrilhaModalOpen(true); }}>
                             <span className={`px-2 py-1 rounded text-xs font-semibold ${item.status === 'Publicado' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-700'}`}>{item.status || 'Rascunho'}</span>
@@ -1223,6 +1273,65 @@ export function CursosAdmin({ loggedUser, orgId }: CursosAdminProps) {
 
   const tempoText = activeCurso?.tempo === 'sem_limite' ? 'Sem limite' : (activeCurso?.duracao ? `${activeCurso?.duracao} ${activeCurso?.duracao_tipo}` : 'Sem limite');
   const ritmoText = activeCurso?.ritmo === 'programado' ? 'Programado' : 'Próprio ritmo';
+  const filteredParticipants = courseParticipants.filter(p => {
+    const nome = (p.usuarios?.nome || '').toLowerCase();
+    const email = (p.usuarios?.email || '').toLowerCase();
+    const search = participantSearch.toLowerCase();
+    
+    const matchesSearch = nome.includes(search) || email.includes(search);
+    
+    if (participantStatusFilter === 'todos') return matchesSearch;
+    
+    const progress = Math.min(100, Math.max(0, p.progresso || 0));
+    if (participantStatusFilter === 'concluido') return matchesSearch && progress >= 100;
+    if (participantStatusFilter === 'andamento') return matchesSearch && progress > 0 && progress < 100;
+    if (participantStatusFilter === 'nao_comecou') return matchesSearch && progress === 0;
+    
+    return matchesSearch;
+  });
+
+  const handleExportCSV = () => {
+    if (filteredParticipants.length === 0) {
+      setModalConfig({
+        isOpen: true,
+        type: 'alert',
+        title: 'Sem dados',
+        message: 'Não há participantes para exportar.',
+        onConfirm: () => setModalConfig(prev => ({ ...prev, isOpen: false }))
+      });
+      return;
+    }
+    
+    const headers = ['Nome', 'Email', 'Progresso', 'Status', 'Data de Entrada', 'Última Atividade'];
+    const rows = filteredParticipants.map(p => {
+      const nome = p.usuarios?.nome || 'Usuário Desconhecido';
+      const email = p.usuarios?.email || '';
+      const progresso = `${Math.min(100, Math.max(0, p.progresso || 0))}%`;
+      const cappedProgress = Math.min(100, Math.max(0, p.progresso || 0));
+      let statusText = 'Em Andamento';
+      if (cappedProgress === 0) statusText = 'Não começou';
+      else if (cappedProgress >= 100) statusText = 'Concluído';
+      
+      const entrada = new Date(p.created_at).toLocaleDateString('pt-BR');
+      const atividade = new Date(p.updated_at).toLocaleDateString('pt-BR');
+      
+      const clean = (str: string) => str.replace(/,/g, ';');
+      
+      return [clean(nome), clean(email), progresso, statusText, entrada, atividade].join(',');
+    });
+    
+    const csvContent = "\uFEFF" + [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `participantes_${activeCurso?.nome || 'curso'}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const precoText = activeCurso?.preco === 'gratuito' ? 'Gratuito' : `Pago`;
 
   return (
@@ -2748,17 +2857,38 @@ export function CursosAdmin({ loggedUser, orgId }: CursosAdminProps) {
         {activeTab === 'participantes' && (
           <div className="space-y-6">
             <div className="flex justify-between items-center">
-              <h3 className="font-bold text-xl text-slate-900">{courseStats.total === 0 ? 6 : courseStats.total} participantes ativos</h3>
+              <h3 className="font-bold text-xl text-slate-900">{filteredParticipants.length} participantes ativos</h3>
               <div className="flex items-center gap-3">
-                <button className="flex items-center gap-2 px-4 py-2 border border-blue-200 text-blue-600 rounded-full text-sm font-medium hover:bg-blue-50">
+                <button 
+                  onClick={handleExportCSV}
+                  className="flex items-center gap-2 px-4 py-2 border border-blue-200 text-blue-600 rounded-full text-sm font-medium hover:bg-blue-50 transition-colors"
+                >
                   <Download className="w-4 h-4"/> Exportar CSV
                 </button>
-                <button className="flex items-center gap-2 px-4 py-2 border border-blue-200 text-blue-600 rounded-full text-sm font-medium hover:bg-blue-50">
-                  <Filter className="w-4 h-4"/> Adicionar filtro
-                </button>
+                
+                <div className="relative">
+                  <Filter className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-blue-600 pointer-events-none" />
+                  <select 
+                    value={participantStatusFilter}
+                    onChange={(e) => setParticipantStatusFilter(e.target.value)}
+                    className="pl-9 pr-8 py-2 border border-blue-200 text-blue-600 rounded-full text-sm font-medium hover:bg-blue-50 focus:outline-none appearance-none cursor-pointer bg-white"
+                  >
+                    <option value="todos">Todos os Status</option>
+                    <option value="concluido">Concluídos</option>
+                    <option value="andamento">Em Andamento</option>
+                    <option value="nao_comecou">Não Começaram</option>
+                  </select>
+                </div>
+
                 <div className="relative">
                   <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input type="text" placeholder="Search" className="pl-9 pr-4 py-2 border border-slate-300 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <input 
+                    type="text" 
+                    placeholder="Pesquisar participante..." 
+                    value={participantSearch}
+                    onChange={(e) => setParticipantSearch(e.target.value)}
+                    className="pl-9 pr-4 py-2 border border-slate-300 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-64" 
+                  />
                 </div>
               </div>
             </div>
@@ -2777,7 +2907,7 @@ export function CursosAdmin({ loggedUser, orgId }: CursosAdminProps) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {(courseParticipants.length > 0 ? courseParticipants.map(participant => {
+                  {(filteredParticipants.length > 0 ? filteredParticipants.map(participant => {
                       const getInitials = (name?: string) => name ? name.substring(0, 2).toUpperCase() : '??';
                       const cappedProgress = Math.min(100, Math.max(0, participant.progresso || 0));
                       const isNew = cappedProgress === 0;
@@ -2817,22 +2947,19 @@ export function CursosAdmin({ loggedUser, orgId }: CursosAdminProps) {
                           isFinished
                       };
                   }) : [
-                    { nome: 'Ademilson Alves', initials: 'AA', rate: '92%', status: 'Excepcional', date1: '23 de abr de 2026', date2: '16 de abr de 2026', bgColor: 'bg-emerald-100', txColor: 'text-emerald-700', quizGrade: null },
-                    { nome: 'Breno Maia', initials: 'BM', rate: '52%', status: 'Alto', date1: '13 de abr de 2026', date2: '13 de abr de 2026', bgColor: 'bg-yellow-100', txColor: 'text-yellow-700', quizGrade: null },
-                    { nome: 'Bruno Maia', initials: 'BM', rate: '8%', status: 'Baixo', date1: '30 de abr de 2026', date2: '13 de abr de 2026', bgColor: 'bg-amber-100', txColor: 'text-amber-700', quizGrade: null },
-                    { nome: 'Rafael Mendes', initials: 'RM', rate: '8%', status: 'Baixo', date1: '17 de abr de 2026', date2: '17 de abr de 2026', bgColor: 'bg-slate-200', txColor: 'text-slate-700', quizGrade: null },
-                    { nome: 'artur magnavita', initials: 'AM', rate: '4%', status: 'Baixo', date1: '16 de abr de 2026', date2: '16 de abr de 2026', bgColor: 'bg-slate-800', txColor: 'text-white', quizGrade: null },
-                    { nome: 'Mariana Rêgo', initials: 'MR', rate: '0%', status: 'Baixo', date1: '30 de abr de 2026', date2: '30 de abr de 2026', bgColor: 'bg-slate-400', txColor: 'text-white', isNew: true, quizGrade: null },
+                    { nome: 'Nenhum resultado encontrado', initials: '?', rate: '-', status: '-', date1: '-', date2: '-', bgColor: 'bg-slate-100', txColor: 'text-slate-400', quizGrade: null, isEmpty: true },
                   ]).map((p, i) => (
-                    <tr key={i} className="hover:bg-slate-50">
+                    <tr key={i} className={`hover:bg-slate-50 ${(p as any).isEmpty ? 'opacity-50' : ''}`}>
                       <td className="px-6 py-4">
                          <div className="flex items-center gap-3">
                            <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm ${p.bgColor} ${p.txColor}`}>{p.initials}</div>
                            <div>
                              <div className="font-medium text-slate-900">{p.nome}</div>
-                             <div className={`text-[10px] uppercase font-semibold mt-0.5 px-2 py-0.5 inline-block rounded ${p.isNew ? 'bg-rose-100 text-rose-700' : p.isFinished ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-800'}`}>
-                               {p.isNew ? 'Não começou' : p.isFinished ? 'Concluído' : 'Em Andamento'}
-                             </div>
+                             {!(p as any).isEmpty && (
+                               <div className={`text-[10px] uppercase font-semibold mt-0.5 px-2 py-0.5 inline-block rounded ${p.isNew ? 'bg-rose-100 text-rose-700' : p.isFinished ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-800'}`}>
+                                 {p.isNew ? 'Não começou' : p.isFinished ? 'Concluído' : 'Em Andamento'}
+                               </div>
+                             )}
                            </div>
                          </div>
                       </td>
@@ -3710,6 +3837,7 @@ export function CursosAdmin({ loggedUser, orgId }: CursosAdminProps) {
           onSave={handleSaveCertificate}
           initialTemplate={editingCertTemplate}
           targetName={createdCourseName}
+          orgId={orgId}
         />
       )}
 

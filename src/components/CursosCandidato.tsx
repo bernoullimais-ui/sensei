@@ -67,6 +67,7 @@ export function CursosCandidato({ previewCourseId, isGestor, userRole: initialUs
 
   // Current user state
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [stats, setStats] = useState<{[key: string]: {participantes: number, concluintes: number}}>({});
 
   useEffect(() => {
     const init = async () => {
@@ -415,17 +416,20 @@ export function CursosCandidato({ previewCourseId, isGestor, userRole: initialUs
         ...trilha,
         trilha_cursos: (trilhaCursosData || []).filter(tc => tc.trilha_id === trilha.id)
       }));
-      console.log('trilhasWithCursos:', trilhasWithCursos);
       setTrilhas(trilhasWithCursos);
+      return { trilhas: trilhasWithCursos, trilhaCursos: trilhaCursosData || [] };
     } catch (err) {
       console.error('Error fetching trilhas:', err);
+      return { trilhas: [], trilhaCursos: [] };
     }
   };
 
   const fetchCursos = async (uId?: string | null) => {
     setIsLoading(true);
     try {
-      await fetchTrilhas();
+      const { trilhas: fetchedTrilhas, trilhaCursos } = await fetchTrilhas();
+      let fetchedCursos = [];
+
       if (previewCourseId) {
         const { data, error } = await supabase
           .from('cursos')
@@ -433,7 +437,8 @@ export function CursosCandidato({ previewCourseId, isGestor, userRole: initialUs
           .eq('id', previewCourseId)
           .single();
         if (error) throw error;
-        setCursos([data]);
+        fetchedCursos = [data];
+        setCursos(fetchedCursos);
         setSelectedCurso(data);
         setView('course');
       } else {
@@ -444,8 +449,8 @@ export function CursosCandidato({ previewCourseId, isGestor, userRole: initialUs
           .order('created_at', { ascending: false });
 
         if (error) throw error;
-        console.log('Fetched cursos:', data);
-        setCursos(data || []);
+        fetchedCursos = data || [];
+        setCursos(fetchedCursos);
       }
       
       const targetUserId = uId || currentUserId;
@@ -465,6 +470,63 @@ export function CursosCandidato({ previewCourseId, isGestor, userRole: initialUs
           });
           setCursosProgress(m as any);
         }
+      }
+
+      // Fetch all participants stats for courses
+      const { data: statsData, error: statsError } = await supabase
+        .from('curso_participantes')
+        .select('curso_id, status, usuario_id');
+
+      if (!statsError && statsData) {
+        const statsMap: {[key: string]: {participantes: number, concluintes: number}} = {};
+        
+        // Initialize all items with 0
+        fetchedCursos.forEach(c => {
+          statsMap[c.id] = { participantes: 0, concluintes: 0 };
+        });
+        fetchedTrilhas.forEach(t => {
+          statsMap[t.id] = { participantes: 0, concluintes: 0 };
+        });
+
+        // Map for Course stats from DB
+        statsData.forEach(row => {
+          if (!statsMap[row.curso_id]) {
+            statsMap[row.curso_id] = { participantes: 0, concluintes: 0 };
+          }
+          statsMap[row.curso_id].participantes++;
+          if (row.status === 'concluido') {
+            statsMap[row.curso_id].concluintes++;
+          }
+        });
+
+        // Map for Trilha stats
+        fetchedTrilhas.forEach(t => {
+          const trailCourses = trilhaCursos.filter(tc => tc.trilha_id === t.id).map(tc => tc.curso_id);
+          if (trailCourses.length > 0) {
+            const trailParticipants = new Set();
+            const trailCompleters = new Set();
+            const userToCompletedCount: {[key: string]: number} = {};
+            
+            statsData.forEach(row => {
+              if (trailCourses.includes(row.curso_id)) {
+                trailParticipants.add(row.usuario_id);
+                if (row.status === 'concluido') {
+                  userToCompletedCount[row.usuario_id] = (userToCompletedCount[row.usuario_id] || 0) + 1;
+                  if (userToCompletedCount[row.usuario_id] === trailCourses.length) {
+                    trailCompleters.add(row.usuario_id);
+                  }
+                }
+              }
+            });
+            
+            statsMap[t.id] = { 
+              participantes: trailParticipants.size, 
+              concluintes: trailCompleters.size 
+            };
+          }
+        });
+
+        setStats(statsMap);
       }
     } catch (err: any) {
       console.error('Error fetching data:', err);
@@ -569,17 +631,32 @@ export function CursosCandidato({ previewCourseId, isGestor, userRole: initialUs
                   <div className="w-full h-40 bg-slate-100 rounded-lg flex items-center justify-center font-bold text-xl text-slate-800 border border-slate-200 bg-cover bg-center" style={{ backgroundImage: curso.thumbnail_url ? `url("${curso.thumbnail_url}")` : undefined }}>
                     {!curso.thumbnail_url && curso.nome}
                   </div>
-                <div className="flex gap-2 w-full justify-center">
-                  {curso.em_breve ? (
-                    <span className="text-sm font-bold text-emerald-600 bg-emerald-50 px-4 py-1 rounded-full border border-emerald-200 uppercase tracking-widest animate-pulse">Em Breve</span>
-                  ) : userRole === 'avaliador' ? (
-                    <span className="text-sm font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full border border-blue-200 flex items-center gap-1">
-                      <Award className="w-3 h-3" /> Cortesia
-                    </span>
-                  ) : curso.preco === 'pago' && curso.valor ? (
-                    <span className="text-sm font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full border border-blue-200">R$ {curso.valor.toFixed(2)}</span>
-                  ) : (
-                    <span className="text-sm font-bold text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200 uppercase tracking-wider">Gratuito</span>
+                <div className="flex flex-col gap-2 w-full items-center">
+                  <div className="flex gap-2 w-full justify-center">
+                    {curso.em_breve ? (
+                      <span className="text-sm font-bold text-emerald-600 bg-emerald-50 px-4 py-1 rounded-full border border-emerald-200 uppercase tracking-widest animate-pulse">Em Breve</span>
+                    ) : userRole === 'avaliador' ? (
+                      <span className="text-sm font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full border border-blue-200 flex items-center gap-1">
+                        <Award className="w-3 h-3" /> Cortesia
+                      </span>
+                    ) : curso.preco === 'pago' && curso.valor ? (
+                      <span className="text-sm font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full border border-blue-200">R$ {curso.valor.toFixed(2)}</span>
+                    ) : (
+                      <span className="text-sm font-bold text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200 uppercase tracking-wider">Gratuito</span>
+                    )}
+                  </div>
+                  
+                  {stats[curso.id] && (
+                    <div className="flex flex-col items-center gap-0.5 text-[10px] font-bold text-slate-500 uppercase tracking-tight">
+                      <div className="flex items-center gap-1">
+                        <Users size={12} className="text-slate-400" />
+                        <span>{stats[curso.id].participantes} Participantes</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <CheckCircle size={12} className="text-emerald-500" />
+                        <span>{stats[curso.id].concluintes} Concluintes</span>
+                      </div>
+                    </div>
                   )}
                 </div>
                 </div>
@@ -672,17 +749,32 @@ export function CursosCandidato({ previewCourseId, isGestor, userRole: initialUs
                           <div className="w-full h-40 bg-slate-100 rounded-lg flex items-center justify-center font-bold text-xl text-slate-800 border border-slate-200 bg-cover bg-center" style={{ backgroundImage: trilha.capa_url ? `url("${trilha.capa_url}")` : undefined }}>
                             {!trilha.capa_url && trilha.nome}
                           </div>
-                        <div className="flex gap-2 w-full justify-center">
-                          {trilha.em_breve ? (
-                            <span className="text-sm font-bold text-emerald-600 bg-emerald-50 px-4 py-1 rounded-full border border-emerald-200 uppercase tracking-widest animate-pulse">Em Breve</span>
-                          ) : userRole === 'avaliador' ? (
-                            <span className="text-sm font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full border border-blue-200 flex items-center gap-1">
-                              <Award className="w-3 h-3" /> Cortesia
-                            </span>
-                          ) : parseFloat(trilha.preco) === 0 ? (
-                            <span className="text-sm font-bold text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200 uppercase tracking-wider">Gratuito</span>
-                          ) : (
-                            <span className="text-sm font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full border border-blue-200">R$ {parseFloat(trilha.preco).toFixed(2)}</span>
+                        <div className="flex flex-col gap-2 w-full items-center">
+                          <div className="flex gap-2 w-full justify-center">
+                            {trilha.em_breve ? (
+                              <span className="text-sm font-bold text-emerald-600 bg-emerald-50 px-4 py-1 rounded-full border border-emerald-200 uppercase tracking-widest animate-pulse">Em Breve</span>
+                            ) : userRole === 'avaliador' ? (
+                              <span className="text-sm font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full border border-blue-200 flex items-center gap-1">
+                                <Award className="w-3 h-3" /> Cortesia
+                              </span>
+                            ) : parseFloat(trilha.preco) === 0 ? (
+                              <span className="text-sm font-bold text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200 uppercase tracking-wider">Gratuito</span>
+                            ) : (
+                              <span className="text-sm font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full border border-blue-200">R$ {parseFloat(trilha.preco).toFixed(2)}</span>
+                            )}
+                          </div>
+
+                          {stats[trilha.id] && (
+                            <div className="flex flex-col items-center gap-0.5 text-[10px] font-bold text-slate-500 uppercase tracking-tight">
+                              <div className="flex items-center gap-1">
+                                <Users size={12} className="text-slate-400" />
+                                <span>{stats[trilha.id].participantes} Participantes</span>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <CheckCircle size={12} className="text-emerald-500" />
+                                <span>{stats[trilha.id].concluintes} Concluintes</span>
+                              </div>
+                            </div>
                           )}
                         </div>
                         </div>

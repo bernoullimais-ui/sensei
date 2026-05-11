@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Upload, Move, Type, Calendar, BookOpen, Download, Save, Trash2, Clock, QrCode } from 'lucide-react';
+import { X, Upload, Move, Type, Calendar, BookOpen, Download, Save, Trash2, Clock, QrCode, Copy, Search, Loader2, ChevronRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { supabase } from '../lib/supabase';
 
 export interface CertificateField {
   id: string;
@@ -25,6 +26,7 @@ interface CertificateDesignerProps {
   onSave: (template: CertificateTemplate) => void;
   initialTemplate?: CertificateTemplate | null;
   targetName: string; // Course or Module name for preview
+  orgId?: string;
 }
 
 const CertificateDesigner: React.FC<CertificateDesignerProps> = ({
@@ -32,7 +34,8 @@ const CertificateDesigner: React.FC<CertificateDesignerProps> = ({
   onClose,
   onSave,
   initialTemplate,
-  targetName
+  targetName,
+  orgId
 }) => {
   const [template, setTemplate] = useState<CertificateTemplate>(
     initialTemplate || { backgroundImage: '', fields: [] }
@@ -42,6 +45,10 @@ const CertificateDesigner: React.FC<CertificateDesignerProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importableTemplates, setImportableTemplates] = useState<any[]>([]);
+  const [isFetchingTemplates, setIsFetchingTemplates] = useState(false);
+  const [importSearch, setImportSearch] = useState('');
 
   // Update when initialTemplate changes (e.g. switching modules)
   useEffect(() => {
@@ -57,6 +64,48 @@ const CertificateDesigner: React.FC<CertificateDesignerProps> = ({
       setImageSize(null);
     }
   }, [initialTemplate, isOpen]);
+
+  const fetchTemplates = async () => {
+    if (!orgId) return;
+    setIsFetchingTemplates(true);
+    try {
+      const [coursesRes, modulesRes, trainingsRes] = await Promise.all([
+        supabase.from('cursos').select('id, nome, certificado_template').eq('organizacao_id', orgId).not('certificado_template', 'is', null),
+        supabase.from('modulos_avaliacao').select('id, nome, tema, certificado_template').eq('organizacao_id', orgId).not('certificado_template', 'is', null),
+        supabase.from('treinamentos').select('id, nome, certificado_template').eq('organizacao_id', orgId).not('certificado_template', 'is', null)
+      ]);
+
+      const allTemplates: any[] = [];
+      
+      if (coursesRes.data) {
+        coursesRes.data.forEach(c => allTemplates.push({ id: c.id, name: c.nome || 'Sem Nome', template: c.certificado_template, type: 'Curso' }));
+      }
+      if (modulesRes.data) {
+        modulesRes.data.forEach(m => allTemplates.push({ id: m.id, name: m.nome || m.tema || 'Sem Nome', template: m.certificado_template, type: 'Módulo' }));
+      }
+      if (trainingsRes.data) {
+        trainingsRes.data.forEach(t => allTemplates.push({ id: t.id, name: t.nome || 'Sem Nome', template: t.certificado_template, type: 'Treinamento' }));
+      }
+
+      setImportableTemplates(allTemplates);
+    } catch (err) {
+      console.error('Error fetching templates:', err);
+    } finally {
+      setIsFetchingTemplates(false);
+    }
+  };
+
+  const handleImportTemplate = (selected: any) => {
+    if (!selected.template) return;
+    
+    setTemplate(selected.template);
+    if (selected.template.backgroundImage) {
+      const img = new Image();
+      img.onload = () => setImageSize({ width: img.width, height: img.height });
+      img.src = selected.template.backgroundImage;
+    }
+    setIsImportModalOpen(false);
+  };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -204,7 +253,7 @@ const CertificateDesigner: React.FC<CertificateDesignerProps> = ({
             {template.backgroundImage ? (
               <div 
                 ref={containerRef}
-                className="relative shadow-xl bg-white bg-no-repeat bg-center"
+                className="relative shadow-xl bg-white bg-no-repeat bg-center mx-auto"
                 style={{ 
                   backgroundImage: `url(${template.backgroundImage})`,
                   backgroundSize: '100% 100%',
@@ -258,15 +307,35 @@ const CertificateDesigner: React.FC<CertificateDesignerProps> = ({
                 ))}
               </div>
             ) : (
-              <div 
-                onClick={() => fileInputRef.current?.click()}
-                className="w-full max-w-md h-64 border-2 border-dashed border-slate-400 rounded-xl flex flex-col items-center justify-center gap-4 bg-white/50 hover:bg-white hover:border-red-500 cursor-pointer transition-all"
-              >
-                <Upload className="text-slate-400" size={48} />
-                <div className="text-center">
-                  <p className="font-medium text-slate-700">Upload de Layout</p>
-                  <p className="text-sm text-slate-500">Selecione uma imagem para o fundo do certificado</p>
+              <div className="flex flex-col items-center gap-6">
+                <div 
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full max-w-md h-64 border-2 border-dashed border-slate-400 rounded-xl flex flex-col items-center justify-center gap-4 bg-white/50 hover:bg-white hover:border-red-500 cursor-pointer transition-all p-8"
+                >
+                  <Upload className="text-slate-400" size={48} />
+                  <div className="text-center">
+                    <p className="font-medium text-slate-700 text-lg">Upload de Layout</p>
+                    <p className="text-sm text-slate-500">Selecione uma imagem para o fundo do certificado</p>
+                  </div>
                 </div>
+
+                {orgId && (
+                  <>
+                    <div className="flex items-center gap-4 w-full max-w-md">
+                      <div className="flex-1 h-px bg-slate-300"></div>
+                      <span className="text-slate-400 text-xs font-bold uppercase tracking-widest">OU</span>
+                      <div className="flex-1 h-px bg-slate-300"></div>
+                    </div>
+
+                    <button 
+                      onClick={() => { fetchTemplates(); setIsImportModalOpen(true); }}
+                      className="flex items-center gap-3 px-8 py-4 bg-white border-2 border-slate-200 rounded-xl text-slate-700 font-bold hover:border-red-500 hover:text-red-600 transition-all shadow-sm group active:scale-95"
+                    >
+                      <Copy size={20} className="text-slate-400 group-hover:text-red-500" />
+                      Importar Design de Outro Curso
+                    </button>
+                  </>
+                )}
               </div>
             )}
             <input 
@@ -280,6 +349,16 @@ const CertificateDesigner: React.FC<CertificateDesignerProps> = ({
 
           {/* Sidebar Controls */}
           <div className="w-full lg:w-72 border-l bg-slate-50 p-6 overflow-y-auto">
+            {template.backgroundImage && orgId && (
+              <button 
+                onClick={() => { fetchTemplates(); setIsImportModalOpen(true); }}
+                className="w-full py-2 mb-6 bg-slate-100 text-slate-600 rounded-lg text-xs font-bold flex items-center justify-center gap-2 hover:bg-slate-200 transition-all border border-slate-200"
+              >
+                <Copy size={14} />
+                Importar outro design
+              </button>
+            )}
+
             <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
               <Type size={18} className="text-red-600" />
               Campos Dinâmicos
@@ -436,6 +515,82 @@ const CertificateDesigner: React.FC<CertificateDesignerProps> = ({
           </div>
         </div>
       </motion.div>
+
+      {/* Import Modal */}
+      <AnimatePresence>
+        {isImportModalOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-xl shadow-2xl w-full max-w-lg flex flex-col max-h-[80vh] overflow-hidden"
+            >
+              <div className="p-4 border-b flex items-center justify-between">
+                <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                  <Copy size={20} className="text-red-600" />
+                  Importar Design
+                </h3>
+                <button onClick={() => setIsImportModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="p-4 border-b">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                  <input 
+                    type="text"
+                    placeholder="Buscar curso ou módulo..."
+                    value={importSearch}
+                    onChange={(e) => setImportSearch(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 bg-slate-50 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-2">
+                {isFetchingTemplates ? (
+                  <div className="flex flex-col items-center justify-center py-12 gap-2">
+                    <Loader2 className="animate-spin text-red-600" size={32} />
+                    <p className="text-slate-500 text-sm font-medium">Buscando designs...</p>
+                  </div>
+                ) : importableTemplates.length === 0 ? (
+                  <div className="text-center py-12 text-slate-500">
+                    Nenhum outro design encontrado.
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    {importableTemplates
+                      .filter(t => (t.name || '').toLowerCase().includes(importSearch.toLowerCase()))
+                      .map(item => (
+                        <button
+                          key={`${item.type}-${item.id}`}
+                          onClick={() => handleImportTemplate(item)}
+                          className="w-full text-left p-3 hover:bg-slate-50 rounded-lg flex items-center justify-between group transition-colors"
+                        >
+                          <div>
+                            <p className="font-medium text-slate-800">{item.name}</p>
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-1.5 py-0.5 bg-slate-100 rounded">
+                              {item.type}
+                            </span>
+                          </div>
+                          <ChevronRight className="text-slate-300 group-hover:text-red-500 transition-colors" size={20} />
+                        </button>
+                      ))
+                    }
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

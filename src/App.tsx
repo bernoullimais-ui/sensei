@@ -7222,6 +7222,7 @@ export default function App() {
           onSave={handleSaveModuloCertificate}
           initialTemplate={editingCertModulo?.certificado_template}
           targetName={editingCertModulo?.nome || editingCertModulo?.tema}
+          orgId={loggedUser?.organizacao_id}
         />
       )}
 
