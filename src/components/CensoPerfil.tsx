@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
-import { Save, UserCircle } from 'lucide-react';
+import { Save, UserCircle, BarChart3, ClipboardList } from 'lucide-react';
+import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, Tooltip } from 'recharts';
 
 interface CensoPerfilProps {
   candidato: any;
@@ -10,6 +11,7 @@ export function CensoPerfil({ candidato }: CensoPerfilProps) {
   const [data, setData] = useState<any>({});
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [activeTab, setActiveTab] = useState<'form' | 'stats'>('form');
 
   useEffect(() => {
     if (candidato?.id) {
@@ -69,6 +71,15 @@ export function CensoPerfil({ candidato }: CensoPerfilProps) {
     setData((prev: any) => ({ ...prev, [field]: value }));
   };
 
+  const radarData = useMemo(() => {
+    return [
+      { subject: 'Fundamentos', A: Number(data.autoAvalFundamentos || 0), fullMark: 5 },
+      { subject: 'Nage-waza', A: Number(data.autoAvalNageWaza || 0), fullMark: 5 },
+      { subject: 'Katame-waza', A: Number(data.autoAvalKatameWaza || 0), fullMark: 5 },
+      { subject: 'Kata', A: Number(data.autoAvalKata || 0), fullMark: 5 },
+    ];
+  }, [data]);
+
   const regioes = ['Salvador/RMS', 'Sul (Itabuna)', 'Sudoeste (Vitória da Conquista)', 'Oeste (Barreiras)'];
 
   if (isLoading) {
@@ -77,23 +88,90 @@ export function CensoPerfil({ candidato }: CensoPerfilProps) {
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-      <div className="bg-slate-800 p-6 text-white flex justify-between items-center">
+      <div className="bg-slate-800 p-6 text-white flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h2 className="text-2xl font-black mb-1 flex items-center gap-2">
             <UserCircle className="w-6 h-6" /> Perfil do Candidato
           </h2>
           <p className="text-slate-300 text-sm">Censo de Candidatos à Graduação 2026</p>
         </div>
-        <button
-          onClick={handleSave}
-          disabled={isSaving}
-          className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-md font-medium hover:bg-red-700 transition-colors disabled:opacity-50"
-        >
-          <Save className="w-4 h-4" /> {isSaving ? 'Salvando...' : 'Salvar Perfil'}
-        </button>
+        <div className="flex items-center gap-2">
+          <div className="flex bg-slate-700 p-1 rounded-lg mr-2">
+            <button 
+              onClick={() => setActiveTab('form')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${activeTab === 'form' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-300 hover:text-white'}`}
+            >
+              <ClipboardList className="w-3.5 h-3.5" /> Formulário
+            </button>
+            <button 
+              onClick={() => setActiveTab('stats')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${activeTab === 'stats' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-300 hover:text-white'}`}
+            >
+              <BarChart3 className="w-3.5 h-3.5" /> Dashboard
+            </button>
+          </div>
+          <button
+            onClick={handleSave}
+            disabled={isSaving}
+            className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-md font-medium hover:bg-red-700 transition-colors disabled:opacity-50 shadow-lg shadow-red-900/20"
+          >
+            <Save className="w-4 h-4" /> {isSaving ? 'Salvando...' : 'Salvar Perfil'}
+          </button>
+        </div>
       </div>
 
-      <div className="p-6 md:p-8 space-y-10">
+      {activeTab === 'stats' ? (
+        <div className="p-6 md:p-8 animate-in fade-in slide-in-from-right-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+            <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 h-[400px]">
+              <h3 className="text-sm font-bold text-slate-800 mb-4 uppercase tracking-wider text-center">Autoavaliação Técnica</h3>
+              <ResponsiveContainer width="100%" height="100%">
+                <RadarChart cx="50%" cy="50%" outerRadius="80%" data={radarData}>
+                  <PolarGrid stroke="#e2e8f0" />
+                  <PolarAngleAxis dataKey="subject" tick={{ fontSize: 10, fontWeight: 700, fill: '#64748b' }} />
+                  <PolarRadiusAxis angle={30} domain={[0, 5]} tick={{ fontSize: 8 }} />
+                  <Radar
+                    name="Minha Avaliação"
+                    dataKey="A"
+                    stroke="#dc2626"
+                    fill="#dc2626"
+                    fillOpacity={0.6}
+                  />
+                  <Tooltip />
+                </RadarChart>
+              </ResponsiveContainer>
+            </div>
+            
+            <div className="space-y-6">
+              <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200">
+                <h3 className="text-sm font-bold text-slate-800 mb-4 uppercase tracking-wider">Resumo do Perfil</h3>
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center border-b border-slate-200 pb-2">
+                    <span className="text-sm text-slate-500">Região de Atuação</span>
+                    <span className="text-sm font-bold text-slate-800">{data.regiao || 'Não Informado'}</span>
+                  </div>
+                  <div className="flex justify-between items-center border-b border-slate-200 pb-2">
+                    <span className="text-sm text-slate-500">Área Principal</span>
+                    <span className="text-sm font-bold text-slate-800">{data.areaAtuacao || 'Não Informado'}</span>
+                  </div>
+                  <div className="flex justify-between items-center border-b border-slate-200 pb-2">
+                    <span className="text-sm text-slate-500">Tempo na Faixa</span>
+                    <span className="text-sm font-bold text-slate-800">{data.tempoFaixaAtual ? `${data.tempoFaixaAtual} anos` : 'Não Informado'}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-red-50 p-6 rounded-2xl border border-red-100">
+                 <h3 className="text-sm font-bold text-red-800 mb-2 uppercase tracking-wider">Meta de Graduação</h3>
+                 <p className="text-sm text-red-700 font-medium leading-relaxed">
+                   {data.motivacao ? data.motivacao.split(':')[1] || data.motivacao : 'Defina seus objetivos no formulário ao lado para visualizar seu dashboard completo.'}
+                 </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="p-6 md:p-8 space-y-10">
         <section>
           <h3 className="font-bold text-lg text-slate-800 mb-4 border-b border-slate-100 pb-2">1. Identificação</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm bg-slate-50 p-4 rounded-xl border border-slate-100">
@@ -263,6 +341,7 @@ export function CensoPerfil({ candidato }: CensoPerfilProps) {
           />
         </section>
       </div>
+      )}
     </div>
   );
 }

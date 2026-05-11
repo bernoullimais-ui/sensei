@@ -31,7 +31,7 @@ export function CursosCandidato({ previewCourseId, isGestor, userRole: initialUs
   const [trilhas, setTrilhas] = useState<any[]>([]);
   const [userRole, setUserRole] = useState<string | null>(initialUserRole || null);
   const [activeTab, setActiveTab] = useState<'cursos' | 'trilhas'>('trilhas');
-  const [cursosProgress, setCursosProgress] = useState<{[key: string]: number}>({});
+  const [cursosProgress, setCursosProgress] = useState<{[key: string]: {progresso: number, nome: string}}>({});
   const [isLoading, setIsLoading] = useState(true);
   const [view, setView] = useState<'list' | 'course' | 'lesson'>('list');
   const [selectedCurso, setSelectedCurso] = useState<any>(null);
@@ -452,15 +452,18 @@ export function CursosCandidato({ previewCourseId, isGestor, userRole: initialUs
       if (targetUserId) {
         const { data: participacoes, error: pErr } = await supabase
           .from('curso_participantes')
-          .select('curso_id, progresso')
+          .select('curso_id, progresso, cursos(nome)')
           .eq('usuario_id', targetUserId);
           
         if (!pErr && participacoes) {
-          const m: {[key: string]: number} = {};
+          const m: {[key: string]: {progresso: number, nome: string}} = {};
           participacoes.forEach(p => {
-             m[p.curso_id] = p.progresso;
+             m[p.curso_id] = { 
+               progresso: p.progresso, 
+               nome: p.cursos?.nome || 'Curso'
+             };
           });
-          setCursosProgress(m);
+          setCursosProgress(m as any);
         }
       }
     } catch (err: any) {
@@ -611,10 +614,10 @@ export function CursosCandidato({ previewCourseId, isGestor, userRole: initialUs
                       <div>
                         <div className="flex justify-between items-center mb-1">
                           <span className="text-xs font-semibold text-slate-600">Progresso</span>
-                          <span className="text-xs font-semibold text-slate-600">{cursosProgress[curso.id]}%</span>
+                          <span className="text-xs font-semibold text-slate-600">{cursosProgress[curso.id].progresso}%</span>
                         </div>
                         <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
-                          <div className="bg-green-500 h-2.5 rounded-full transition-all duration-500" style={{ width: `${cursosProgress[curso.id]}%` }}></div>
+                          <div className="bg-green-500 h-2.5 rounded-full transition-all duration-500" style={{ width: `${cursosProgress[curso.id].progresso}%` }}></div>
                         </div>
                       </div>
                     )}
@@ -626,7 +629,7 @@ export function CursosCandidato({ previewCourseId, isGestor, userRole: initialUs
                               {userRole === 'avaliador' ? 'Acesso Cortesia' : 'Curso Adquirido'}
                             </span>
                          )}
-                         {cursosProgress[curso.id] === 100 && curso.certificado_template && (
+                         {cursosProgress[curso.id]?.progresso === 100 && curso.certificado_template && (
                             <button 
                               onClick={(e) => {
                                 e.stopPropagation();

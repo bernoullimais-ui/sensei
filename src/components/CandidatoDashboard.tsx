@@ -18,9 +18,11 @@ import { CertificateTemplate } from './CertificateDesigner';
 import { RealizarProva } from './RealizarProva';
 import { ReviewExam } from './ReviewExam';
 import { CurriculoCandidato } from './CurriculoCandidato';
+import { calculateCurriculumPoints, getRequiredPoints, getNextDan } from './CurriculoCandidato.utils';
 import { CensoPerfil } from './CensoPerfil';
 import { CursosCandidato } from './CursosCandidato';
 import { Community } from './Community';
+import { CandidatoDashboardView } from './CandidatoDashboardView';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
 import { supabase } from '../lib/supabase';
 
@@ -40,15 +42,101 @@ export function CandidatoDashboard({
   orgSettings, onDownloadCertificate, onShowToast 
 }: CandidatoDashboardProps) {
   // Para ouvintes, a aba inicial depende do tipo de inscrição
-  const initialTab = candidato.role === 'ouvinte' 
-    ? (candidato.tipo_inscricao === 'curso' ? 'cursos' : 'resultados')
-    : 'perfil';
+  const initialTab = 'dashboard';
     
-  const [activeTab, setActiveTab] = useState<'provas' | 'resultados' | 'curriculo' | 'perfil' | 'cursos' | 'comunidade'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'provas' | 'resultados' | 'curriculo' | 'perfil' | 'cursos' | 'comunidade'>(initialTab);
+  const [communityTab, setCommunityTab] = useState<'feed' | 'messages'>('feed');
   const [selectedEval, setSelectedEval] = useState<any | null>(null);
   const [showReview, setShowReview] = useState<string | null>(null);
   const [detailedData, setDetailedData] = useState<{waza: any[], kata: any[], kihon: any[]}>({ waza: [], kata: [], kihon: [] });
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+  
+  // Dashboard data states
+  const [cursosList, setCursosList] = useState<any[]>([]);
+  const [pendingMessagesCount, setPendingMessagesCount] = useState(0);
+  const [newPostsCount, setNewPostsCount] = useState(0);
+  const [curriculoProgress, setCurriculoProgress] = useState<{pontos: number, maximo: number}>({pontos: 0, maximo: 0});
+
+  useEffect(() => {
+     // Handle platform access time for post counting
+     const now = new Date().toISOString();
+     const existingAccess = localStorage.getItem('last_platform_access');
+     
+     // To track true "last access" between sessions, we only update the storage once per tab session.
+     if (!sessionStorage.getItem('session_recorded')) {
+         if (existingAccess) {
+             sessionStorage.setItem('previous_platform_access', existingAccess);
+         }
+         localStorage.setItem('last_platform_access', now);
+         sessionStorage.setItem('session_recorded', 'true');
+     }
+  }, []);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      // Fetch Cursos
+      const { data: participacoes, error: pErr } = await supabase
+        .from('curso_participantes')
+        .select(`
+          curso_id, 
+          progresso, 
+          cursos(id, nome)
+        `)
+        .eq('usuario_id', candidato.auth_id || candidato.id);
+        
+      setCursosList(participacoes || []);
+
+      // Fetch Messages
+       const { data: messages } = await supabase
+        .from('community_messages')
+        .select('*')
+        .eq('receiver_id', candidato.auth_id || candidato.id)
+        .eq('read', false);
+        
+      setPendingMessagesCount(messages?.length || 0);
+
+      // Fetch new posts
+      const referenceDate = sessionStorage.getItem('previous_platform_access') || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      if (orgSettings?.id || candidato.organizacao_id) {
+         const { count } = await supabase
+           .from('community_posts')
+           .select('*', { count: 'exact', head: true })
+           .eq('organizacao_id', orgSettings?.id || candidato.organizacao_id)
+           .gt('created_at', referenceDate);
+           
+         setNewPostsCount(count || 0);
+      }
+
+      // Fetch Curriculo
+      if (candidato.role !== 'ouvinte') {
+        const { data: cData } = await supabase
+          .from('candidatos')
+          .select('curriculo_json')
+          .eq('id', candidato.reference_id || candidato.id)
+          .single();
+          
+        if (cData?.curriculo_json && typeof cData.curriculo_json === 'object') {
+          const fetched = cData.curriculo_json;
+          let finalGrauPretendido = fetched.grauPretendido || getNextDan(candidato.graduacao || candidato.grau_atual);
+          const pts = calculateCurriculumPoints(fetched);
+          const max = getRequiredPoints(finalGrauPretendido);
+          setCurriculoProgress({ pontos: pts, maximo: max });
+        }
+      }
+    };
+    
+    if (candidato) {
+      fetchData();
+      
+      const channel = supabase.channel('messages_count')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'community_messages', filter: `receiver_id=eq.${candidato.auth_id || candidato.id}` }, () => {
+              fetchData();
+          })
+          .subscribe();
+      
+      return () => { supabase.removeChannel(channel); };
+    }
+  }, [candidato]);
 
   // Filter results for this candidate
   const myAggregatedResults = useMemo(() => {
@@ -560,6 +648,12 @@ export function CandidatoDashboard({
           <div className="flex flex-col md:flex-row items-center gap-4">
             {/* Main Navigation Tabs */}
             <div className="flex flex-wrap justify-center bg-red-800 rounded-lg p-1">
+              <button 
+                  onClick={() => { setActiveTab('dashboard'); setSelectedEval(null); }}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'dashboard' ? 'bg-white text-red-700 shadow-sm' : 'text-red-100 hover:bg-red-700'}`}
+                >
+                  <TrendingUp className="w-4 h-4" /> Dashboard
+                </button>
               {candidato.role !== 'ouvinte' && (
                 <button 
                   onClick={() => { setActiveTab('perfil'); setSelectedEval(null); }}
@@ -620,6 +714,29 @@ export function CandidatoDashboard({
       </header>
 
       <main className="max-w-5xl mx-auto mt-8 px-4">
+        {activeTab === 'dashboard' && (
+          <CandidatoDashboardView 
+            onNavigate={(tab, subTab) => { 
+                setActiveTab(tab); 
+                setSelectedEval(null); 
+                if (tab === 'comunidade' && subTab) {
+                    setCommunityTab(subTab as any);
+                    if (subTab === 'feed') {
+                        setNewPostsCount(0);
+                        const now = new Date().toISOString();
+                        sessionStorage.setItem('previous_platform_access', now);
+                        localStorage.setItem('last_platform_access', now);
+                    }
+                }
+            }} 
+            resultados={myAggregatedResults}
+            cursos={cursosList}
+            pendingMessagesCount={pendingMessagesCount}
+            newPostsCount={newPostsCount}
+            curriculoProgress={curriculoProgress}
+          />
+        )}
+        
         {activeTab === 'perfil' && (
           <CensoPerfil candidato={candidato} />
         )}
@@ -641,7 +758,7 @@ export function CandidatoDashboard({
         )}
 
         {activeTab === 'comunidade' && (
-          <Community loggedUser={candidato} orgSettings={orgSettings} />
+          <Community loggedUser={candidato} orgSettings={orgSettings} initialTab={communityTab} />
         )}
       </main>
     </div>

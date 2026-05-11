@@ -73,10 +73,11 @@ interface UserSummary {
 interface CommunityProps {
   loggedUser: any;
   orgSettings: any;
+  initialTab?: 'feed' | 'messages';
 }
 
-export const Community: React.FC<CommunityProps> = ({ loggedUser, orgSettings }) => {
-  const [activeTab, setActiveTab] = useState<'feed' | 'messages'>('feed');
+export const Community: React.FC<CommunityProps> = ({ loggedUser, orgSettings, initialTab = 'feed' }) => {
+  const [activeTab, setActiveTab] = useState<'feed' | 'messages'>(initialTab);
   const [posts, setPosts] = useState<Post[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);

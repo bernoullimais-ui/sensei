@@ -2,6 +2,7 @@ import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { supabase } from './lib/supabase';
 import CertificateDesigner, { CertificateTemplate } from './components/CertificateDesigner';
 import { generateCertificatePDF } from './lib/certificateUtils';
+import { ReviewExam } from './components/ReviewExam';
 import { PlacarResultados } from './components/PlacarResultados';
 import { TreinamentoCapacitacao } from './components/TreinamentoCapacitacao';
 import { ContatosAdmin } from './components/ContatosAdmin';
@@ -64,7 +65,8 @@ import {
   WifiOff,
   CloudOff,
   Share2,
-  BarChart3
+  BarChart3,
+  Eye
 } from 'lucide-react';
 
 import { PerfisAdmin } from './components/PerfisAdmin';
@@ -479,6 +481,7 @@ export default function App() {
   const [orgSettings, setOrgSettings] = useState<{ nome: string, logo_url: string | null, cor_primaria: string } | null>(null);
   const [editingOrgSettings, setEditingOrgSettings] = useState<{ nome: string, logo_url: string | null, cor_primaria: string } | null>(null);
   const [isSavingOrg, setIsSavingOrg] = useState(false);
+  const [selectedReviewExam, setSelectedReviewExam] = useState<{provaId: string, candidatoId: string} | null>(null);
   const [loginZempo, setLoginZempo] = useState('');
   const [senhaZempo, setSenhaZempo] = useState('');
   const [loginError, setLoginError] = useState('');
@@ -617,6 +620,12 @@ export default function App() {
     return { profile: mappedProfile, role: finalRole };
   };
 
+  const isUserAdmin = (user: any) => {
+    if (!user) return false;
+    const role = user.role || user.funcao;
+    return role === 'gestor' || role === 'admin' || user.nome?.trim().toLowerCase() === 'bruno maia pereira';
+  };
+
   // Load session on mount
   useEffect(() => {
     const savedSession = localStorage.getItem('judo_tech_session');
@@ -652,6 +661,9 @@ export default function App() {
               setMainTab('resultados');
               setCurrentView('resultados');
             }
+          } else if (isUserAdmin(user)) {
+            setMainTab('dashboard');
+            setCurrentView('dashboard');
           } else {
             setMainTab('avaliacao');
             setCurrentView('avaliacao');
@@ -676,13 +688,8 @@ export default function App() {
     } else {
       localStorage.removeItem('judo_tech_session');
     }
-  }, [loggedUser, loggedRole]);
 
-  const isUserAdmin = (user: any) => {
-    if (!user) return false;
-    const role = user.role || user.funcao;
-    return role === 'gestor' || role === 'admin' || user.nome?.trim().toLowerCase() === 'bruno maia pereira';
-  };
+  }, [loggedUser, loggedRole]);
 
   // --- Cache Local (Modo Offline) ---
   useEffect(() => {
@@ -1238,11 +1245,10 @@ export default function App() {
 
     const teoricas = resultadosTeoricos.map(rt => {
       let finalVeredito = 'Pendente';
-      if (rt.media !== null && rt.media !== undefined) {
-        if (rt.media >= 70) finalVeredito = 'Aprovado';
-        else if (rt.media >= 50) finalVeredito = 'Pendente';
-        else finalVeredito = 'Reprovado';
-      }
+      const percentual = (rt.media || 0) * 10;
+      if (percentual >= 70) finalVeredito = 'Aprovado';
+      else if (percentual >= 50) finalVeredito = 'Pendente';
+      else finalVeredito = 'Reprovado';
 
       return {
         id: rt.id,
@@ -1252,7 +1258,7 @@ export default function App() {
         grau_pretendido: rt.grau_pretendido,
         modulo_id: 'teorica',
         modulo_nome: rt.modulo,
-        media_teorica: (rt.media || 0) * 10,
+        media_teorica: percentual,
         veredito: finalVeredito,
         avaliadores_count: 1,
         isTeorica: true,
@@ -1262,7 +1268,7 @@ export default function App() {
 
     const provas = resultadosProvas.map(rp => {
       let finalVeredito = 'Pendente';
-      const percentual = rp.nota * 10; // Convert 0-10 to 0-100%
+      const percentual = (rp.nota || 0) * 10; // Convert 0-10 to 0-100%
       if (percentual >= 70) finalVeredito = 'Aprovado';
       else if (percentual >= 50) finalVeredito = 'Pendente';
       else finalVeredito = 'Reprovado';
@@ -1271,6 +1277,7 @@ export default function App() {
 
       return {
         id: rp.id,
+        prova_id: rp.prova_id,
         created_at: rp.finalizada_em,
         candidato_id: rp.candidato_id,
         candidato_nome: candidato ? candidato.nome : 'Desconhecido',
@@ -1708,6 +1715,9 @@ export default function App() {
               setMainTab('resultados');
               setCurrentView('resultados');
             }
+          } else if (isUserAdmin(enriched.profile)) {
+            setMainTab('dashboard');
+            setCurrentView('dashboard');
           } else {
             setSelectedAvaliadorId(enriched.profile.id);
             setMainTab('avaliacao');
@@ -1751,6 +1761,9 @@ export default function App() {
               setMainTab('resultados');
               setCurrentView('resultados');
             }
+          } else if (isUserAdmin(enriched.profile)) {
+            setMainTab('dashboard');
+            setCurrentView('dashboard');
           } else {
             setSelectedAvaliadorId(enriched.profile.id);
             setMainTab('avaliacao');
@@ -3484,6 +3497,18 @@ export default function App() {
   }
 
   const renderResultados = () => {
+    if (selectedReviewExam) {
+      return (
+        <div className="animate-in fade-in slide-in-from-bottom-4 mb-20">
+          <ReviewExam 
+            provaId={selectedReviewExam.provaId} 
+            candidatoId={selectedReviewExam.candidatoId} 
+            onBack={() => setSelectedReviewExam(null)} 
+          />
+        </div>
+      );
+    }
+
     const filteredAcompanhamento = acompanhamentoData.filter(cand => {
       const matchSearch = cand.nome.toLowerCase().includes(filtroAcompanhamento.toLowerCase()) || 
                           cand.dojo.toLowerCase().includes(filtroAcompanhamento.toLowerCase());
@@ -3678,6 +3703,15 @@ export default function App() {
                           </td>
                           <td className="p-3 text-center">
                             <div className="flex items-center justify-center gap-2">
+                              {res.isProvaTeorica && res.prova_id && (
+                                <button 
+                                  onClick={() => setSelectedReviewExam({ provaId: res.prova_id, candidatoId: res.candidato_id })}
+                                  className="text-slate-500 hover:text-blue-600 p-2 rounded-full hover:bg-blue-50 transition-colors"
+                                  title="Ver Detalhes das Respostas"
+                                >
+                                  <Eye className="w-5 h-5" />
+                                </button>
+                              )}
                               {!res.isTeorica && !res.isProvaTeorica && (
                                 <button 
                                   onClick={() => handlePrintResult(res)}
@@ -5793,7 +5827,7 @@ export default function App() {
         )}
 
         {isUserAdmin(loggedUser) && mainTab === 'cursos' && loggedRole !== 'avaliador_convidado' && (
-          <CursosAdmin />
+          <CursosAdmin loggedUser={loggedUser} orgId={loggedUser?.organizacao_id} />
         )}
         
         {!isUserAdmin(loggedUser) && (loggedRole === 'avaliador' || loggedRole === 'coordenador') && mainTab === 'cursos' && (

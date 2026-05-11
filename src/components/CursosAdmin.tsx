@@ -30,7 +30,12 @@ const getFormattedVideoUrl = (url: string) => {
   return formattedUrl;
 };
 
-export function CursosAdmin() {
+interface CursosAdminProps {
+  loggedUser?: any;
+  orgId?: string;
+}
+
+export function CursosAdmin({ loggedUser, orgId }: CursosAdminProps) {
   const [view, setView] = useState<'list' | 'create_wizard' | 'course_dashboard'>('list');
   const [wizardStep, setWizardStep] = useState(1);
   const [createdCourseName, setCreatedCourseName] = useState('Tutorial DOJO TV');
@@ -437,20 +442,27 @@ export function CursosAdmin() {
   const fetchCursos = async () => {
     setIsLoading(true);
     try {
-      const [{ data: cursosData, error: cursosError }, { data: trilhasData, error: trilhasError }] = await Promise.all([
-        supabase.from('cursos').select('id, nome, preco, status, ordem, created_at, thumbnail_url, professor_nome, carga_horaria').order('ordem', { ascending: true, nullsFirst: false }),
-        supabase.from('trilhas').select('*').order('ordem', { ascending: true, nullsFirst: false })
-      ]);
+      // Fetch everything first to debug
+      const { data: cursosData, error: cursosError } = await supabase
+        .from('cursos')
+        .select('id, nome, preco, status, ordem, created_at, thumbnail_url, professor_nome, professor_titulo, professor_foto_url, descricao, carga_horaria, ritmo, tempo, duracao, duracao_tipo, valor, em_breve, configuracao_json, certificado_template')
+        .order('ordem', { ascending: true, nullsFirst: false });
+        
+      const { data: trilhasData, error: trilhasError } = await supabase
+        .from('trilhas')
+        .select('*')
+        .order('ordem', { ascending: true, nullsFirst: false });
 
       if (cursosError) console.error('Error fetching courses:', cursosError);
       if (trilhasError) console.error('Error fetching trilhas:', trilhasError);
       
+      // Client-side filtering if needed, for now just show all to see if they appear
       const combined = [
         ...(cursosData || []).map(c => ({ ...c, type: 'curso' })),
         ...(trilhasData || []).map(t => ({ ...t, type: 'trilha' }))
       ];
       
-      // If none have order, sort by created_at desc
+      // Sort
       if (combined.every(i => i.ordem === null)) {
         combined.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
       } else {
@@ -1321,6 +1333,7 @@ export function CursosAdmin() {
                   if (editingTrilha) {
                       alert('Abrir edição de trilha no modal');
                   } else {
+                    setCreatedCourseId(activeCurso?.id || '');
                     setEditingSettingsData({
                       nome: activeCurso?.nome || '',
                       thumbnail_url: activeCurso?.thumbnail_url || '',
@@ -3301,9 +3314,11 @@ export function CursosAdmin() {
                       em_breve: editingSettingsData.em_breve
                     };
 
+                    const completeData = { ...updateData, thumbnail_url: editingSettingsData.thumbnail_url };
+                    console.log('Salvando configurações do curso:', completeData);
+
                     // Try updating everything including thumbnail_url
                     try {
-                      const completeData = { ...updateData, thumbnail_url: editingSettingsData.thumbnail_url };
                       const { error } = await supabase.from('cursos').update(completeData).eq('id', createdCourseId);
                       if (error) throw error;
                       
