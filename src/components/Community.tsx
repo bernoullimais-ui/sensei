@@ -327,6 +327,28 @@ export const Community: React.FC<CommunityProps> = ({ loggedUser, orgSettings, i
         // Update local count if trigger hasn't reached yet
         setPosts(prev => prev.map(p => p.id === newComm.post_id ? { ...p, comments_count: (p.comments_count || 0) + 1 } : p));
       })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'community_comments' }, (payload) => {
+        const oldCommId = payload.old.id;
+        // Since DELETE payload doesn't have the post_id easily accessible in the simplified payload, 
+        // we might need to find it by scanning existing comments if we want to be precise,
+        // or just filter it out from all posts in the state.
+        setComments(prev => {
+          const next = { ...prev };
+          let foundPostId: string | null = null;
+          Object.keys(next).forEach(postId => {
+            const initialLen = next[postId].length;
+            next[postId] = next[postId].filter(c => c.id !== oldCommId);
+            if (next[postId].length < initialLen) {
+              foundPostId = postId;
+            }
+          });
+          
+          if (foundPostId) {
+            setPosts(postsPrev => postsPrev.map(p => p.id === foundPostId ? { ...p, comments_count: Math.max(0, p.comments_count - 1) } : p));
+          }
+          return next;
+        });
+      })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'community_messages' }, (payload) => {
         console.log('Realtime DM Insert:', payload);
         const newMsg = payload.new as DirectMessage;
@@ -520,6 +542,40 @@ export const Community: React.FC<CommunityProps> = ({ loggedUser, orgSettings, i
     } catch (error: any) {
       console.error('Delete error details:', error);
       alert('Erro ao excluir: ' + (error.message || 'Erro desconhecido'));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteComment = async (postId: string, commentId: string) => {
+    if (!confirm('Deseja realmente excluir este comentário?')) return;
+    setIsSubmitting(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Sessão expirada. Faça login novamente.');
+
+      const { error, count } = await supabase
+        .from('community_comments')
+        .delete({ count: 'exact' })
+        .eq('id', commentId);
+      
+      if (error) throw error;
+
+      if (count === 0) {
+        throw new Error('Você não tem permissão para excluir este comentário ou ele já foi removido.');
+      }
+      
+      // Update local state
+      setComments(prev => ({
+        ...prev,
+        [postId]: (prev[postId] || []).filter(c => c.id !== commentId)
+      }));
+      // Decrement comment count locally
+      setPosts(prev => prev.map(p => p.id === postId ? { ...p, comments_count: Math.max(0, p.comments_count - 1) } : p));
+      
+    } catch (error: any) {
+      console.error('Delete comment error details:', error);
+      alert('Erro ao excluir comentário: ' + (error.message || 'Erro desconhecido'));
     } finally {
       setIsSubmitting(false);
     }
@@ -852,6 +908,16 @@ export const Community: React.FC<CommunityProps> = ({ loggedUser, orgSettings, i
                                         <span className="text-slate-400 text-[10px] font-medium">
                                           {new Date(comment.created_at).toLocaleDateString()}
                                         </span>
+                                        {(isGestor || comment.user_id === myId) && (
+                                          <button
+                                            onClick={() => handleDeleteComment(post.id, comment.id)}
+                                            disabled={isSubmitting}
+                                            className="p-1 text-slate-300 hover:text-red-500 rounded transition-colors"
+                                            title="Excluir comentário"
+                                          >
+                                            <Trash2 className="w-3 h-3" />
+                                          </button>
+                                        )}
                                       </div>
                                     </div>
                                     <p className="text-slate-600 text-sm font-medium leading-relaxed">

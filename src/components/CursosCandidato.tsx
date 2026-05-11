@@ -42,6 +42,24 @@ export function CursosCandidato({ previewCourseId, isGestor, userRole: initialUs
   const [expandedSections, setExpandedSections] = useState<{[key: number]: boolean}>({});
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
+  const calculateProgress = (curso: any, steps: string[]) => {
+    if (!curso || !curso.curriculo_json) return 0;
+    const curriculo = curso.curriculo_json || [];
+    let totalEtapas = 0;
+    let validStepIds = new Set<string>();
+    curriculo.forEach((s: any, sIdx: number) => {
+      if (s.etapas) {
+        totalEtapas += s.etapas.length;
+        s.etapas.forEach((e: any, eIdx: number) => {
+          validStepIds.add(e.id || `step-${sIdx}-${eIdx}`);
+        });
+      }
+    });
+    const validCompleted = (steps || []).filter(id => validStepIds.has(id));
+    const progresso = totalEtapas === 0 ? 0 : Math.round((validCompleted.length / totalEtapas) * 100);
+    return Math.min(100, Math.max(0, progresso));
+  };
+
   // Video states
   const [videoProgress, setVideoProgress] = useState(0);
   const [videoWatched, setVideoWatched] = useState(false);
@@ -115,7 +133,7 @@ export function CursosCandidato({ previewCourseId, isGestor, userRole: initialUs
             // Fetch from database
             const { data, error } = await supabase
               .from('curso_participantes')
-              .select('completed_steps, quiz_scores')
+              .select('completed_steps, quiz_scores, progresso, status')
               .eq('curso_id', selectedCurso.id)
               .eq('usuario_id', userId)
               .maybeSingle();
@@ -123,6 +141,28 @@ export function CursosCandidato({ previewCourseId, isGestor, userRole: initialUs
             let parsedSteps: string[] = [];
             if (data && data.completed_steps) {
               parsedSteps = data.completed_steps;
+              
+              // Consistency check: recalculate progress and compare with DB
+              const curriculo = selectedCurso.curriculo_json || [];
+              let totalEtapas = 0;
+              let validStepIds = new Set<string>();
+              curriculo.forEach((s: any, sIdx: number) => {
+                if (s.etapas) {
+                  totalEtapas += s.etapas.length;
+                  s.etapas.forEach((e: any, eIdx: number) => {
+                    validStepIds.add(e.id || `step-${sIdx}-${eIdx}`);
+                  });
+                }
+              });
+              const validCompleted = parsedSteps.filter(id => validStepIds.has(id));
+              const calculatedProgresso = totalEtapas === 0 ? 0 : Math.round((validCompleted.length / totalEtapas) * 100);
+              const expectedStatus = calculatedProgresso >= 100 ? 'concluido' : 'andamento';
+              
+              // If discrepancy found, trigger sync to repair the database
+              if (data.progresso !== calculatedProgresso || data.status !== expectedStatus) {
+                console.log(`Discrepancy detected in course ${selectedCurso.id}: DB=${data.progresso}%, Calculated=${calculatedProgresso}%. Repairing...`);
+                syncProgressToDb(selectedCurso, parsedSteps, data.quiz_scores || {}, userId);
+              }
             } else {
               // Read local storage as fallback
               const stored = localStorage.getItem(`progresso_curso_${selectedCurso.id}_${userId}`);
@@ -341,21 +381,17 @@ export function CursosCandidato({ previewCourseId, isGestor, userRole: initialUs
       const targetUserId = explicitUserId || currentUserId;
       if (!targetUserId) return;
       
-      const curriculo = curso.curriculo_json || [];
-      let totalEtapas = 0;
-      let validStepIds = new Set<string>();
-      curriculo.forEach((s: any, sIdx: number) => {
-        if (s.etapas) {
-          totalEtapas += s.etapas.length;
-          s.etapas.forEach((e: any, eIdx: number) => {
-            validStepIds.add(e.id || `step-${sIdx}-${eIdx}`);
-          });
-        }
-      });
-      const validCompleted = steps.filter(id => validStepIds.has(id));
-      let progresso = totalEtapas === 0 ? 0 : Math.round((validCompleted.length / totalEtapas) * 100);
-      progresso = Math.min(100, Math.max(0, progresso));
+      const progresso = calculateProgress(curso, steps);
       const status = progresso >= 100 ? 'concluido' : 'andamento';
+
+      // Update local state for listing page to prevent visual discrepancy
+      setCursosProgress(prev => ({
+        ...prev,
+        [curso.id]: {
+          progresso,
+          nome: curso.nome
+        }
+      }));
 
       await supabase.from('curso_participantes').upsert({
         curso_id: curso.id,
@@ -457,14 +493,18 @@ export function CursosCandidato({ previewCourseId, isGestor, userRole: initialUs
       if (targetUserId) {
         const { data: participacoes, error: pErr } = await supabase
           .from('curso_participantes')
-          .select('curso_id, progresso, cursos(nome)')
+          .select('curso_id, progresso, status, completed_steps, cursos(nome, curriculo_json)')
           .eq('usuario_id', targetUserId);
           
         if (!pErr && participacoes) {
           const m: {[key: string]: {progresso: number, nome: string}} = {};
           participacoes.forEach(p => {
+             // Use calculated progress if possible, fallback to DB
+             const cursoData = fetchedCursos.find(c => c.id === p.curso_id) || p.cursos;
+             const calcProg = calculateProgress(cursoData, p.completed_steps);
+             
              m[p.curso_id] = { 
-               progresso: p.progresso, 
+               progresso: calcProg, 
                nome: p.cursos?.nome || 'Curso'
              };
           });
@@ -909,19 +949,8 @@ export function CursosCandidato({ previewCourseId, isGestor, userRole: initialUs
   if (view === 'course' && selectedCurso) {
     const curriculo = selectedCurso.curriculo_json || [];
 
-    // Calculate total progress
-    let totalEtapas = 0;
-    let etapasConcluidas = 0;
-    curriculo.forEach((s: any, sIdx: number) => {
-      totalEtapas += (s.etapas?.length || 0);
-      s.etapas?.forEach((e: any, eIdx: number) => {
-        const stepId = getStepId(e, sIdx, eIdx);
-        if (completedSteps.includes(stepId)) {
-          etapasConcluidas++;
-        }
-      });
-    });
-    const progressoPercent = totalEtapas === 0 ? 0 : Math.round((etapasConcluidas / totalEtapas) * 100);
+    // Calculate total progress using central helper
+    const progressoPercent = calculateProgress(selectedCurso, completedSteps);
 
     let lastSecaoIdx = -1;
     let lastEtapaIdx = -1;
